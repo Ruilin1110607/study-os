@@ -21,6 +21,7 @@ const App = (() => {
   let genBusy = false;
   let aiBusy = false;
   let chatting = false;
+  let quiz = null;
 
   const TAGC = { '到期复习': 'amber', '薄弱推进': 'blue', '新学': 'green', '练习': 'purple', '休息': 'gray' };
   const tagCls = t => TAGC[t] || 'gray';
@@ -144,7 +145,7 @@ const App = (() => {
 
     let stripHtml = '';
     try {
-      if (window.Profiler) {
+      if (typeof Profiler !== 'undefined') {
         const m = Profiler.compute();
         if (m) {
           const lastA = S.assessments[0];
@@ -175,7 +176,26 @@ const App = (() => {
          </div>`
       : '';
 
-    const items = S.planItems.length ? S.planItems.map(it => `
+    let insightsHtml = '';
+    try {
+      if (typeof Intel !== 'undefined') {
+        const ins = Intel.insights();
+        if (ins.length) insightsHtml = `<div class="card">
+          <div class="card-head"><h3>Agent 洞察</h3><span class="muted sm">基于你此刻的数据</span></div>
+          ${ins.map(i => `
+          <div class="insight-row">
+            <span class="ii">${i.icon}</span>
+            <div class="it grow">${esc(i.text)}</div>
+            ${i.act ? `<button class="btn ghost sm" data-act="insight-go" data-kind="${esc(i.act)}" ${i.kpId ? `data-id="${i.kpId}"` : ''}>去处理</button>` : ''}
+          </div>`).join('')}
+        </div>`;
+      }
+    } catch (e) { insightsHtml = ''; }
+
+    const todaysItems = S.planItems.filter(i => !i.planDate || i.planDate <= t);
+    const futureItems = S.planItems.filter(i => i.planDate && i.planDate > t)
+      .sort((a, b) => (a.planDate < b.planDate ? -1 : 1));
+    const items = todaysItems.length ? todaysItems.map(it => `
       <li class="plan-item ${it.done ? 'done' : ''}">
         <span class="pi-check ${it.done ? 'on' : ''}" data-act="item-toggle" data-id="${it.id}">✓</span>
         <div class="pi-body">
@@ -184,6 +204,7 @@ const App = (() => {
             <span class="tag ${tagCls(it.tag)}">${esc(it.tag)}</span>
             <span class="muted sm">${it.minutes} 分钟</span>
             ${it.source === 'ai' ? '<span class="tag blue">AI 规划</span>' : ''}
+            ${it.source === 'agent' ? '<span class="tag blue">Agent</span>' : ''}
             ${it.source === 'rule' ? '<span class="tag gray">规则规划</span>' : ''}
           </div>
           ${it.reason ? `<div class="reason">${esc(it.reason)}</div>` : ''}
@@ -191,9 +212,18 @@ const App = (() => {
       </li>`).join('')
       : `<li><div class="empty">今天还没有学习清单<br>点右上角「生成今日计划」开始</div></li>`;
 
-    const totalMin = S.planItems.reduce((a, i) => a + i.minutes, 0);
-    const doneMin = S.planItems.filter(i => i.done).reduce((a, i) => a + i.minutes, 0);
+    const totalMin = todaysItems.reduce((a, i) => a + i.minutes, 0);
+    const doneMin = todaysItems.filter(i => i.done).reduce((a, i) => a + i.minutes, 0);
     const pct = totalMin ? Math.round(doneMin / totalMin * 100) : 0;
+    const futureNote = futureItems.length ? `
+      <div class="note" style="background:var(--purple-soft);color:var(--purple)">🗓️ Agent 已排入未来任务 ${futureItems.length} 项（最早 ${Engine.fmtCN(futureItems[0].planDate)}）：${futureItems.slice(0, 3).map(x => esc(x.title)).join('、')}${futureItems.length > 3 ? ' 等' : ''}。到日期会自动出现在当日清单。</div>` : '';
+
+    const todayMin = S.logs.filter(l => l.date === t).reduce((a, l) => a + (l.minutes || 0), 0)
+      + ((S.pomodoroLog && S.pomodoroLog[t]) ? S.pomodoroLog[t].minutes : 0);
+    const overallMastery = S.kps.length
+      ? Math.round(S.kps.reduce((a, p) => a + p.mastery, 0) / S.kps.length) : 0;
+    const weekGoalPct = Math.min(100, Math.round(
+      st.weekMin / Math.max(60, (S.profile.dailyMinutes || 120) * 7) * 100));
 
     return `
     <div class="page-head">
@@ -208,13 +238,16 @@ const App = (() => {
     </div>
 
     <div class="chips-row">
+      <span class="chip stat">今日学习<b>${todayMin} 分钟</b></span>
+      <span class="chip stat">本周投入<b>${(st.weekMin / 60).toFixed(1)} h</b><span class="sm muted">（周目标 ${weekGoalPct}%）</span></span>
+      <span class="chip stat">总体掌握度<b>${overallMastery}%</b></span>
       <span class="chip stat">连续学习<b>${st.streak} 天</b></span>
-      <span class="chip stat">本周投入<b>${(st.weekMin / 60).toFixed(1)} h</b></span>
       <span class="chip stat">待复习<b>${st.due} 项</b></span>
       ${exams}
     </div>
 
     ${stripHtml}
+    ${insightsHtml}
 
     <div class="card">
       <div class="card-head">
@@ -228,6 +261,7 @@ const App = (() => {
       <div class="progress"><i style="width:${pct}%"></i></div>
       <div class="sub" style="margin-top:6px">已完成 ${doneMin} / ${totalMin} 分钟 · ${pct}%</div>` : ''}
       ${S.planNote ? `<div class="note">${esc(S.planNote)}</div>` : ''}
+      ${futureNote}
       ${adjustBanner}
     </div>`;
   }
@@ -235,18 +269,23 @@ const App = (() => {
   function kpRow(p) {
     const due = p.nextReview && p.nextReview <= Engine.today();
     const nextTxt = !p.nextReview ? '未安排' : due ? '今日到期' : Engine.fmtCN(p.nextReview);
+    const acc = (typeof Intel !== 'undefined') ? Intel.accuracy(p) : null;
+    const star = (p.importance || 0) >= 4;
     return `
-    <div class="plan-item" style="padding:9px 2px">
+    <div class="plan-item" style="padding:9px 2px;flex-wrap:wrap">
       <div class="pi-body">
-        <div class="pi-title" style="font-size:13.5px;font-weight:500">${esc(p.name)}</div>
+        <div class="pi-title" style="font-size:13.5px;font-weight:500">${star ? '<span style="color:var(--amber)">★</span> ' : ''}${esc(p.name)}</div>
         <div class="meta">
           <span class="tag ${mTag(p.mastery)}">${p.mastery}%</span>
           <span class="sm" style="${due ? 'color:var(--red);font-weight:600' : 'color:var(--muted)'}">复习：${nextTxt}</span>
+          ${acc != null ? `<span class="tag ${acc >= 80 ? 'green' : acc >= 60 ? 'blue' : 'red'}">正确率 ${acc}%</span>` : ''}
           ${p.errCount ? `<span class="tag red">错题 ${p.errCount}</span>` : ''}
         </div>
       </div>
+      <button class="mini" data-act="kp-practice" data-id="${p.id}">练习</button>
       <button class="mini" data-act="kp-checkin" data-id="${p.id}">打卡</button>
       <button class="mini" data-act="kp-mistake" data-id="${p.id}">记错题</button>
+      <button class="mini ${star ? 'star-on' : ''}" data-act="kp-star" data-id="${p.id}">${star ? '★ 核心' : '☆ 标核心'}</button>
       <button class="mini" data-act="kp-del" data-id="${p.id}">×</button>
     </div>`;
   }
@@ -264,6 +303,18 @@ const App = (() => {
     const cards = S.courses.map(c => {
       const kps = S.kps.filter(p => p.courseId === c.id);
       const avg = kps.length ? Math.round(kps.reduce((a, p) => a + p.mastery, 0) / kps.length) : 0;
+      const agg = courseAgg(c.id);
+      const dd = c.examDate ? Engine.diffDays(Engine.today(), c.examDate) : -1;
+      const metaRow = (kps.length || agg.minutes) ? `
+      <div class="course-meta">
+        ${agg.minutes ? `<span title="累计学习时长">⏱ <b>${(agg.minutes / 60).toFixed(1)}</b> h</span>` : ''}
+        <span>📚 <b>${kps.length}</b> 个知识点 · 平均 <b>${avg}%</b></span>
+        ${agg.qcount ? `<span title="题库题目数">📝 题目 <b>${agg.qcount}</b></span>` : ''}
+        ${agg.acc != null ? `<span title="练习正确率">✅ 正确率 <b style="${agg.acc >= 80 ? 'color:var(--green)' : agg.acc >= 60 ? '' : 'color:var(--red)'}">${agg.acc}%</b></span>` : ''}
+        ${agg.lastStudy ? `<span title="最近学习日期">🕐 最近学习 ${Engine.fmtCN(agg.lastStudy)}</span>` : ''}
+        ${dd >= 0 ? `<span class="${dd <= 14 ? 'cm-warn' : ''}">📅 考试还有 <b>${dd}</b> 天</span>` : ''}
+        ${agg.weak.length ? `<span class="cm-weak" title="${esc(agg.weak.map(w => w.name).join('、'))}">🎯 薄弱：${esc(agg.weak[0].name)}${agg.weak.length > 1 ? ` 等 ${agg.weak.length} 个` : ''}</span>` : ''}
+      </div>` : '';
       const groups = [];
       const seen = {};
       kps.forEach(p => {
@@ -281,7 +332,6 @@ const App = (() => {
         <div class="card-head">
           <span style="width:11px;height:11px;border-radius:50%;background:${c.color};flex-shrink:0"></span>
           <h3>${esc(c.name)}</h3>
-          <span class="muted sm">${kps.length} 个知识点 · 平均掌握 ${avg}%</span>
           <label class="sm muted" style="display:inline-flex;align-items:center;gap:6px;margin:0">考试日期
             <input type="date" data-chg="exam-date" data-id="${c.id}" value="${c.examDate || ''}" style="width:auto;padding:5px 8px">
           </label>
@@ -289,6 +339,7 @@ const App = (() => {
           <button class="btn ghost sm" data-act="kp-add" data-course="${c.id}">+ 知识点</button>
           <button class="mini" data-act="course-del" data-id="${c.id}">删除课程</button>
         </div>
+        ${metaRow}
         ${body || '<div class="empty">还没有知识点，点右上角添加</div>'}
       </div>`;
     }).join('');
@@ -335,6 +386,22 @@ const App = (() => {
       const p = Engine.kp(m.kpId);
       return p && p.courseId === mkFilter;
     });
+
+    let ei = { total: 0, dist: [], weak: [] };
+    try { if (typeof Intel !== 'undefined') ei = Intel.errorIntel(); } catch (e) {}
+    const distCard = ei.total ? `
+    <div class="card">
+      <div class="card-head"><h3>错因分布</h3><span class="muted sm">近 ${ei.total} 条错误记录</span></div>
+      ${ei.dist.map(d2 => `
+      <div class="bar-row">
+        <span class="lbl">${esc(d2.tag)}</span>
+        <div class="bar"><i style="width:${d2.pct}%;background:linear-gradient(90deg,#e5484d,#f59e0b)"></i></div>
+        <span class="val">${d2.count}</span>
+      </div>`).join('')}
+      ${ei.weak.length ? `<div class="sub" style="margin-top:12px">最需要攻克：
+        ${ei.weak.map(w => esc(w.name)).join('、')}</div>` : ''}
+    </div>` : '';
+
     return `
     <div class="page-head">
       <div><h1>错题本</h1><div class="sub">记录错题后可让 AI 定位根因；记错题的知识点第二天自动进入复习队列</div></div>
@@ -343,6 +410,7 @@ const App = (() => {
         <button class="btn primary sm" data-act="mk-add">+ 记录错题</button>
       </div>
     </div>
+    ${distCard}
     ${list.length ? list.map(mkCard).join('') : '<div class="card"><div class="empty">暂无错题记录</div></div>'}`;
   }
 
@@ -366,10 +434,108 @@ const App = (() => {
     </div>`;
   }
 
+  let dataRange = 7;
+
+  function trendDays(n) {
+    const S = Store.state;
+    const byDay = {};
+    S.logs.forEach(l => { if (l.date) byDay[l.date] = (byDay[l.date] || 0) + (l.minutes || 0); });
+    const t = Engine.today();
+    const rows = [];
+    for (let i = n - 1; i >= 0; i--) {
+      const d = Engine.addDays(t, -i);
+      rows.push({ d, v: byDay[d] || 0 });
+    }
+    return rows;
+  }
+
+  function svgLineChart(rows) {
+    const w = 640, h = 170, padL = 34, padR = 10, padT = 12, padB = 22;
+    const max = Math.max(30, ...rows.map(r => r.v));
+    const n = rows.length;
+    const x = i => padL + (w - padL - padR) * (n === 1 ? 0 : i / (n - 1));
+    const y = v => padT + (h - padT - padB) * (1 - v / max);
+    const pts = rows.map((r, i) => x(i).toFixed(1) + ',' + y(r.v).toFixed(1)).join(' ');
+    const area = `${padL},${y(0).toFixed(1)} ${pts} ${x(n - 1).toFixed(1)},${y(0).toFixed(1)}`;
+    const grid = [max, max / 2].map(g =>
+      `<line x1="${padL}" y1="${y(g)}" x2="${w - padR}" y2="${y(g)}" stroke="var(--line)" stroke-dasharray="3 4"/><text x="${padL-5}" y="${y(g)+3.5}" text-anchor="end" class="lc-y">${Math.round(g)}</text>`).join('');
+    const lblEvery = Math.max(1, Math.ceil(n / 7));
+    const labels = rows.map((r, i) => (i % lblEvery === 0 || i === n - 1)
+      ? `<text x="${x(i)}" y="${h - 6}" text-anchor="middle" class="lc-x">${parseInt(r.d.split('-')[2], 10)}日</text>` : '').join('');
+    const dots = rows.map((r, i) =>
+      `<circle cx="${x(i).toFixed(1)}" cy="${y(r.v).toFixed(1)}" r="2.6" fill="var(--brand)"><title>${r.d} · ${r.v} 分钟</title></circle>`).join('');
+    return `<svg viewBox="0 0 ${w} ${h}" class="lchart" role="img">
+      ${grid}
+      <polygon points="${area}" fill="var(--brand)" opacity=".08"/>
+      <polyline points="${pts}" fill="none" stroke="var(--brand)" stroke-width="2" stroke-linejoin="round"/>
+      ${dots}${labels}</svg>`;
+  }
+
+  function svgDonut(dist) {
+    if (!dist.length) return '';
+    const colors = ['#4f6bf0', '#e5484d', '#f59e0b', '#8b5cf6', '#10b981', '#0ea5e9', '#69718a'];
+    const total = dist.reduce((a, d) => a + d.count, 0);
+    const R = 44, C = 2 * Math.PI * R;
+    let off = 0;
+    const segs = dist.map((d, i) => {
+      const len = C * d.count / total;
+      const s = `<circle r="${R}" cx="60" cy="60" fill="none" stroke="${colors[i % colors.length]}" stroke-width="15"
+        stroke-dasharray="${len.toFixed(2)} ${(C - len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}"
+        transform="rotate(-90 60 60)"><title>${esc(d.tag)}：${d.count} 条（${d.pct}%）</title></circle>`;
+      off += len;
+      return s;
+    }).join('');
+    return `<div class="donut-wrap">
+      <svg viewBox="0 0 120 120" class="donut">${segs}
+        <text x="60" y="58" text-anchor="middle" class="dn-num">${total}</text>
+        <text x="60" y="73" text-anchor="middle" class="dn-lbl">条记录</text></svg>
+      <div class="legend">${dist.map((d, i) =>
+        `<span class="lg-item"><i style="background:${colors[i % colors.length]}"></i>${esc(d.tag)}<b>${d.pct}%</b></span>`).join('')}</div>
+    </div>`;
+  }
+
+  function kpChanges(days) {
+    const S = Store.state;
+    const cut = Engine.addDays(Engine.today(), -(days - 1));
+    const byKp = {};
+    S.events.forEach(e => {
+      if (!e.kpId || !e.date || e.date < cut) return;
+      const d = (e.payload && e.payload.delta) || 0;
+      if (d) byKp[e.kpId] = (byKp[e.kpId] || 0) + d;
+    });
+    return S.kps.map(p => ({ p, delta: byKp[p.id] || 0 }))
+      .filter(x => Math.abs(x.delta) >= 1)
+      .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+      .slice(0, 6)
+      .map(({ p, delta }) => ({
+        name: (Engine.courseName(p.courseId) ? Engine.courseName(p.courseId) + ' · ' : '') + p.name,
+        start: Math.max(0, Math.min(100, p.mastery - delta)),
+        end: p.mastery
+      }));
+  }
+
+  function courseAgg(courseId) {
+    const S = Store.state;
+    const ids = new Set(S.kps.filter(p => p.courseId === courseId).map(p => p.id));
+    let minutes = 0, lastStudy = '';
+    S.logs.forEach(l => {
+      if (!ids.has(l.kpId)) return;
+      minutes += l.minutes || 0;
+      if (l.date && l.date > lastStudy) lastStudy = l.date;
+    });
+    const atts = S.attempts.filter(a => ids.has(a.kpId));
+    const acc = atts.length ? Math.round(atts.filter(a => a.isCorrect).length / atts.length * 100) : null;
+    const qcount = S.questions.filter(q => ids.has(q.kpId)).length;
+    const weak = S.kps
+      .filter(p => p.courseId === courseId && ((p.errCount || 0) > 0 || p.mastery < 60))
+      .sort((a, b) => (100 - b.mastery) + b.errCount * 6 - ((100 - a.mastery) + a.errCount * 6))
+      .slice(0, 3);
+    return { minutes, lastStudy, acc, qcount, weak };
+  }
+
   function vData() {
     const S = Store.state;
     const st = Engine.stats();
-    const maxMin = Math.max(...st.trend.map(d => d.minutes), 30);
 
     const statCards = `
     <div class="grid4">
@@ -379,12 +545,28 @@ const App = (() => {
       <div class="stat-card"><b>${st.due}</b><span>待复习知识点</span></div>
     </div>`;
 
+    const trendRows = trendDays(dataRange);
     const chart = `
     <div class="card">
-      <div class="card-head"><h3>近 14 天学习时长</h3></div>
-      <div class="chart">${st.trend.map(d =>
-        `<div class="col"><i style="height:${Math.round(d.minutes / maxMin * 100)}%" title="${d.date} · ${d.minutes} 分钟"></i></div>`).join('')}</div>
-      <div class="xlabels">${st.trend.map(d => `<span>${parseInt(d.date.split('-')[2], 10)}</span>`).join('')}</div>
+      <div class="card-head">
+        <h3>学习时长趋势</h3>
+        <span class="muted sm">分钟 / 天</span>
+        <span class="grow"></span>
+        <div style="display:flex;gap:6px">
+          ${[[7, '近 7 天'], [30, '近 30 天']].map(([n, l]) =>
+            `<button class="btn sm ${dataRange === n ? 'primary' : 'ghost'}" data-act="data-range" data-n="${n}">${l}</button>`).join('')}
+        </div>
+      </div>
+      ${svgLineChart(trendRows)}
+    </div>`;
+
+    let ei = { total: 0, dist: [], weak: [] };
+    try { if (typeof Intel !== 'undefined') ei = Intel.errorIntel(); } catch (e) {}
+    const donut = `
+    <div class="card">
+      <div class="card-head"><h3>错误类型分布</h3><span class="grow"></span>
+        <button class="mini" data-act="nav-jump" data-view="mistakes">查看错题本 →</button></div>
+      ${ei.total ? svgDonut(ei.dist) : '<div class="empty">还没有错误记录，保持住！</div>'}
     </div>`;
 
     const bars = `
@@ -396,6 +578,21 @@ const App = (() => {
           <div class="bar"><i style="width:${x.avg}%"></i></div>
           <span class="val">${x.avg}%</span>
         </div>`).join('') || '<div class="empty">暂无数据</div>'}
+    </div>`;
+
+    const changes = kpChanges(30);
+    const changesCard = `
+    <div class="card">
+      <div class="card-head"><h3>知识点变化</h3><span class="muted sm">近 30 天掌握度变化（基于打卡与练习）</span></div>
+      ${changes.length ? changes.map(c2 => {
+        const up = c2.end >= c2.start;
+        return `
+        <div class="bar-row">
+          <span class="lbl" title="${esc(c2.name)}">${esc(c2.name)}</span>
+          <div class="bar"><i style="width:${c2.start}%;opacity:.35"></i><i style="width:${c2.end - c2.start}%;margin-left:${c2.start}%;background:${up ? 'var(--green)' : 'var(--red)'}"></i></div>
+          <span class="val" style="${up ? 'color:var(--green);width:auto' : 'color:var(--red);width:auto'}">${c2.start}% → ${c2.end}%</span>
+        </div>`;
+      }).join('') : '<div class="empty">最近 30 天暂无明显变化。<br>坚持打卡和练习，这里会记录你的每一步。</div>'}
     </div>`;
 
     const bn = `
@@ -425,7 +622,14 @@ const App = (() => {
     <div class="page-head">
       <div><h1>学习数据</h1><div class="sub">你的学习行为与知识状态全景</div></div>
     </div>
-    ${statCards}${chart}${bars}${bn}
+    ${statCards}
+    ${chart}
+    <div class="grid2">
+      ${bars}
+      ${donut}
+    </div>
+    ${changesCard}
+    ${bn}
     <div class="card">
       <div class="card-head">
         <h3>AI 分析</h3>
@@ -446,8 +650,22 @@ const App = (() => {
       + (p.goal && !GOALS.includes(p.goal) ? `<option selected>${esc(p.goal)}</option>` : '');
     const presetOpts = Object.entries(AI.PRESETS)
       .map(([k, v]) => `<option value="${k}" ${api.preset === k ? 'selected' : ''}>${v.label}</option>`).join('');
+    const curPreset = AI.PRESETS[api.preset];
+    const acctCard = Store.transport === 'api' ? `
+    <div class="card">
+      <div class="card-head"><h3>账户与同步</h3></div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span>当前账户：<b>${esc(p.name || '用户')}</b></span>
+        <span class="tag green">云同步已开启</span>
+        <span class="grow"></span>
+        <button class="btn ghost sm" data-act="logout">退出登录</button>
+      </div>
+      <div class="sub" style="margin-top:10px">学习数据实时保存到服务器数据库，换设备登录同一账号即可继续；API 配置也随账户走。</div>
+    </div>` : '';
     return `
     <div class="page-head"><div><h1>设置</h1></div></div>
+
+    ${acctCard}
 
     <div class="card">
       <div class="card-head"><h3>个人资料</h3></div>
@@ -475,11 +693,14 @@ const App = (() => {
           <div class="field"><label>模型名称</label><input id="f-model" value="${esc(api.model)}" placeholder="deepseek-chat"></div>
         </div>
         <div class="field"><label>API Key（仅保存在本机浏览器）</label><input id="f-key" type="password" value="${esc(api.key)}" placeholder="sk-..."></div>
+        ${curPreset && curPreset.keyUrl ? `<div class="sub" style="margin:-8px 0 12px"><a href="${curPreset.keyUrl}" target="_blank" rel="noopener" style="color:var(--brand)">去获取 ${esc(curPreset.label.split('（')[0])} 的 API Key ↗</a>　Gemini / 智谱均有免费额度</div>` : '<div class="sub" style="margin:-8px 0 12px">选择服务商后，这里会出现申请 Key 的直达链接</div>'}
         <div style="display:flex;gap:10px">
           <button class="btn primary sm" type="submit">保存配置</button>
           <button class="btn ghost sm" type="button" data-act="api-test">测试连接</button>
         </div>
-        <div class="sub" style="margin-top:10px">默认「免费体验」走公共接口，无需 Key 即可用，但速度较慢、高峰期可能限流；日常使用推荐注册 DeepSeek（送额度）填入 Key。Key 只存本机浏览器，请求直连服务商，不经第三方。</div>
+        <div class="sub" style="margin-top:10px">Agent 需要接入一个 AI 服务才能对话与智能出题；推荐 Gemini（免费 Key）或 DeepSeek（便宜）。${Store.transport === 'api'
+          ? '当前为云同步模式：Key 保存在服务器数据库，所有 AI 请求由后端代理转发，浏览器不经手密钥。'
+          : '当前为本机模式：Key 只存本机浏览器，请求直连服务商。'}未接入时学习OS以本地智能引擎运行，规划、复习排期与快速自测不受影响。</div>
       </form>
     </div>
 
@@ -488,7 +709,7 @@ const App = (() => {
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn ghost sm" data-act="export">导出备份</button>
         <button class="btn ghost sm" data-act="import-btn">导入备份</button>
-        <button class="btn ghost sm" data-act="demo-load">载入示例数据</button>
+        <button class="btn ghost sm" data-act="demo-load">载入试用数据</button>
         <button class="btn danger sm" data-act="wipe">清空学习数据</button>
         <input type="file" id="import-file" accept=".json" style="display:none">
       </div>
@@ -844,6 +1065,7 @@ const App = (() => {
       ['📌', '智能今日计划', 'AI 根据薄弱点、复习到期与考试倒计时，每天排出一份"为什么学它"的清单；只剩一小时？告诉 Agent 立刻重排。'],
       ['🧠', '知识树 + 科学复习', '课程→章节→知识点三级体系，打卡自动更新掌握度，按间隔算法（1/2/4/7/15 天）安排下次复习。'],
       ['🔍', '错题本 + AI 诊断', '定位根因、找出概念缺口、给出补救方案，并把薄弱知识点直接排进明天的复习队列。'],
+      ['🎯', '主动回忆练习室', 'AI 按知识点出选择题（也可手动加题、快速自测）；智能推荐今天最值得练的目标，答错自动回流错题本与复习队列。'],
       ['📊', '学习数据全景', '连续天数、时长趋势、各科掌握度、瓶颈 TOP3；AI 周报解读状态，考试风险提前预测。'],
       ['📈', '后台自动体检', '打开网页即自动评估近期学习状态：拖延了吗？时间失衡吗？哪些知识点在反复出错？结论直达通知中心。'],
       ['🗺️', '知识地图 + 成长路径', '选专业生成知识地图（支持粘贴培养方案解析）；设定长期目标，AI 倒推里程碑并反哺每日计划。'],
@@ -851,7 +1073,7 @@ const App = (() => {
       ['💬', 'Study Agent 随时问', '"我只有 1 小时该怎么安排？""我最近哪里最薄弱？"右下角唤出对话框，它看得见你的所有数据，答得有理有据。']
     ];
     openModal(`
-    <div class="modal-head">学习OS <span class="muted sm" style="font-weight:400">v2.0 · AI 学习决策系统</span></div>
+    <div class="modal-head">学习OS <span class="muted sm" style="font-weight:400">v3.0 · Personal Learning OS</span></div>
     <div class="modal-body">
       <p class="about-lead">大多数学习 App 只帮你<b>记录</b>——学了几小时、打了几天卡。<br>「学习OS」回答的是更重要的问题：<b>今天到底该学什么？</b></p>
       <p class="sm muted" style="line-height:1.85">每一门课、每个知识点都有掌握度和复习排期；每次错题都被 AI 定位根因；打开网页那一刻，Agent 已读完你的全部学习数据，把今天最值得投入的时间安排好，并告诉你为什么。从每日计划、期末风险预测，到围绕长期目标的成长路径——它是属于你个人的学习操作系统。</p>
@@ -986,35 +1208,423 @@ const App = (() => {
     ${todoCard}`;
   }
 
-  const VIEWS = { today: vToday, tools: vTools, tree: vTree, mistakes: vMistakes, data: vData, growth: vGrowth, settings: vSettings };
+  function accPct() {
+    const A = Store.state.attempts.slice(-20);
+    if (!A.length) return null;
+    return Math.round(A.filter(a => a.isCorrect).length / A.length * 100);
+  }
+
+  function qRowHtml(q) {
+    const p = Engine.kp(q.kpId);
+    return `
+    <div class="plan-item" style="padding:8px 0;flex-wrap:wrap">
+      <div class="pi-body">
+        <div class="pi-title" style="font-size:13px;font-weight:500" title="${esc(q.stem)}">${esc(q.stem.length > 46 ? q.stem.slice(0, 46) + '…' : q.stem)}</div>
+        <div class="meta">
+          <span class="sm muted">${esc(p ? p.name : '(知识点已删除)')}</span>
+          ${q.source === 'ai' ? '<span class="tag blue">AI 出题</span>' : '<span class="tag gray">手动</span>'}
+        </div>
+      </div>
+      <button class="mini" data-act="prac-one" data-id="${q.id}">单练</button>
+      <button class="mini" data-act="q-del" data-id="${q.id}">×</button>
+    </div>`;
+  }
+
+  function vPractice() {
+    ensurePomoTimer();
+    const S = Store.state;
+    const t = Engine.today();
+    const todayN = S.attempts.filter(a => a.date === t).length;
+    const acc = accPct();
+    let missions = [];
+    try { if (typeof Intel !== 'undefined') missions = Intel.missions(3); } catch (e) {}
+
+    const missionCard = `
+    <div class="card">
+      <div class="card-head"><h3>智能推荐</h3><span class="muted sm">薄弱度 × 遗忘风险 × 考试紧迫，自动排序</span></div>
+      ${missions.length ? missions.map(({ p, m }) => `
+      <div class="mission-row">
+        <div class="m-score">${m.score}</div>
+        <div class="m-body">
+          <div style="font-weight:600;font-size:13.5px">${esc((Engine.courseName(p.courseId) ? Engine.courseName(p.courseId) + ' · ' : '') + p.name)}</div>
+          <div class="meta">
+            <span class="tag ${m.level === 'high' ? 'red' : m.level === 'mid' ? 'amber' : 'green'}">遗忘风险 ${m.risk}</span>
+            <span class="muted sm">${esc(m.reasons.join(' · '))}</span>
+            <span class="muted sm">建议 ${m.recMin} 分钟</span>
+          </div>
+        </div>
+        <button class="btn ghost sm" data-act="prac-self" data-id="${p.id}">快速自测</button>
+        ${AI.ready() ? `<button class="btn primary sm" data-act="prac-gen-kp" data-id="${p.id}">AI 出题</button>` : ''}
+      </div>`).join('') : '<div class="empty">先到「知识树」添加知识点，<br>这里会自动给出今天最值得练的目标</div>'}
+    </div>`;
+
+    const groups = [];
+    const seenQ = {};
+    S.questions.forEach(q => {
+      const p = Engine.kp(q.kpId);
+      const key = p ? p.courseId : '_none';
+      if (!seenQ[key]) { seenQ[key] = { courseId: key, qs: [] }; groups.push(seenQ[key]); }
+      seenQ[key].qs.push(q);
+    });
+    const bankCard = `
+    <div class="card">
+      <div class="card-head">
+        <h3>我的题库</h3>
+        <span class="grow"></span>
+        <button class="btn ghost sm" data-act="q-add-open">+ 手动加题</button>
+        ${AI.ready() ? '<button class="btn primary sm" data-act="q-gen-open">AI 批量出题</button>' : ''}
+      </div>
+      ${S.questions.length ? groups.map(g => {
+        const c = Engine.course(g.courseId);
+        const choiceN = g.qs.filter(q => q.options && q.options.length >= 2).length;
+        return `
+        <details class="report">
+          <summary>${esc(c ? c.name : '未关联课程')}<span class="muted sm" style="font-weight:400">${g.qs.length} 题</span></summary>
+          <div class="rep-body">
+            <div style="margin-bottom:8px"><button class="btn primary sm" data-act="prac-set" data-course="${esc(g.courseId)}">整组开练（${choiceN} 道选择题）</button></div>
+            ${g.qs.slice().reverse().map(qRowHtml).join('')}
+          </div>
+        </details>`;
+      }).join('') : `<div class="empty">题库还是空的。<br>${AI.ready()
+        ? '点右上角「AI 批量出题」，或对智能推荐的知识点点「AI 出题」。'
+        : '配置 AI 后可一键出题；现在也可以用「手动加题」和上方「快速自测」。'}</div>`}
+    </div>`;
+
+    const recent = S.attempts.slice(-8).reverse().map(a => {
+      const p = Engine.kp(a.kpId);
+      return `
+      <div class="plan-item" style="padding:7px 2px">
+        <div class="pi-body">
+          <div class="pi-title" style="font-size:13px;font-weight:500">${esc(p ? p.name : '(知识点已删除)')}</div>
+          <div class="meta"><span class="sm muted">${a.date} ${new Date(a.ts).toTimeString().slice(0, 5)}</span></div>
+        </div>
+        <span class="tag ${a.isCorrect ? 'green' : 'red'}">${a.isCorrect ? '答对' : '答错'}</span>
+      </div>`;
+    }).join('');
+    const recentCard = `
+    <div class="card">
+      <div class="card-head"><h3>最近练习</h3><span class="grow"></span>
+        <span class="muted sm">累计 ${S.attempts.length} 次</span></div>
+      ${recent || '<div class="empty">还没有练习记录，从上面的智能推荐开始吧</div>'}
+    </div>`;
+
+    return `
+    <div class="page-head">
+      <div><h1>练习室</h1><div class="sub">主动回忆是最强的记忆方式 —— 练错的知识点会回流错题本与复习队列</div></div>
+      <div class="chips-row" style="margin:0">
+        <span class="chip stat">今日练习<b>${todayN} 次</b></span>
+        <span class="chip stat">近20次正确率<b>${acc == null ? '—' : acc + '%'}</b></span>
+      </div>
+    </div>
+    ${missionCard}${bankCard}${recentCard}`;
+  }
+
+  function fillKpInto(sel, courseId, selId) {
+    const el = $(sel);
+    if (!el) return;
+    const list = Store.state.kps.filter(p => p.courseId === courseId);
+    el.innerHTML = list.length
+      ? list.map(p => `<option value="${p.id}" ${selId === p.id ? 'selected' : ''}>${esc((p.chapter ? p.chapter + ' · ' : '') + p.name)}</option>`).join('')
+      : '<option value="">（该课程暂无知识点）</option>';
+  }
+
+  let lastQuizWrong = [];
+
+  function recordAttempt(kpId, qid, ok, errorType) {
+    const S = Store.state;
+    S.attempts.push({
+      id: Store.uid(), kpId, questionId: qid || '', isCorrect: !!ok,
+      errorType: errorType || '', date: Engine.today(), ts: Date.now()
+    });
+    Engine.practiceResult(kpId, ok);
+    Store.logEvent('practice_attempt', kpId, { isCorrect: !!ok });
+  }
+
+  function startSelfTest(kpId) {
+    const p = Engine.kp(kpId);
+    if (!p) return;
+    quiz = { mode: 'self', idx: 0, correct: 0, answered: false, items: [{ kpId }], wrong: [] };
+    renderSelfStep();
+  }
+
+  function renderSelfStep() {
+    const it = quiz.items[quiz.idx];
+    const p = Engine.kp(it.kpId);
+    const nm = p ? ((Engine.courseName(p.courseId) ? Engine.courseName(p.courseId) + ' · ' : '') + p.name) : '';
+    openModal(`
+    <div class="modal-head">快速自测 · ${esc(nm)}</div>
+    <div class="modal-body">
+      <div class="q-stem" style="font-size:15px">合上资料，回忆「${esc(p ? p.name : '')}」：</div>
+      <ul class="sm muted" style="line-height:2;padding-left:18px;margin-bottom:12px">
+        <li>它的定义 / 公式 / 核心步骤是什么？</li>
+        <li>典型题目长什么样，从哪里下手？</li>
+        <li>自己以前在哪一步栽过跟头？</li>
+      </ul>
+      <div class="note">回忆完成后翻开资料对照，诚实自评——主动回忆 + 诚实反馈，是效率最高的复习方式。</div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn danger sm" data-act="qz-self" data-ok="0">没掌握</button>
+      <button type="button" class="btn primary sm" data-act="qz-self" data-ok="1">掌握了</button>
+    </div>`);
+  }
+
+  async function genAndStart(kpId, count, diff) {
+    if (aiBusy || !guardAI()) return;
+    aiBusy = true;
+    toast('Agent 正在出题…');
+    try {
+      const list = await AI.genQuestions(kpId, count, diff);
+      if (!list.length) throw new Error('没有生成有效题目，请重试');
+      const S = Store.state;
+      const made = list.map(q => {
+        const o = {
+          id: Store.uid(), kpId, type: 'choice',
+          stem: q.stem, options: q.options, answer: q.answer, explain: q.explain,
+          source: 'ai', createdAt: Engine.today()
+        };
+        S.questions.push(o);
+        return o;
+      });
+      Store.save();
+      closeModal();
+      aiBusy = false;
+      toast(`已生成 ${made.length} 道题，开始练习`, 'success');
+      startSet(made.map(q => q.id));
+    } catch (e) {
+      toast('出题失败：' + e.message, 'error');
+    } finally { aiBusy = false; }
+  }
+
+  function startSet(ids) {
+    const S = Store.state;
+    const qs = ids.map(id => S.questions.find(q => q.id === id)).filter(Boolean);
+    if (!qs.length) { toast('没有可练习的题目，先加几道题吧', 'error'); return; }
+    quiz = {
+      mode: 'choice', idx: 0, correct: 0, answered: false, wrong: [],
+      items: qs.map(q => ({ q }))
+    };
+    renderQuizStep();
+  }
+
+  function renderQuizStep() {
+    const it = quiz.items[quiz.idx];
+    const q = it.q;
+    const prog = Math.round(quiz.idx / quiz.items.length * 100);
+    const p = Engine.kp(q.kpId);
+    openModal(`
+    <div class="modal-head">${esc(p ? p.name : '练习')}<span class="muted sm" style="font-weight:400;margin-left:8px">${quiz.idx + 1} / ${quiz.items.length} · 答对 ${quiz.correct}</span></div>
+    <div class="modal-body">
+      <div class="qz-prog"><i style="width:${prog}%"></i></div>
+      <div class="q-stem">${esc(q.stem)}</div>
+      <div id="qz-opts">${(q.options || []).map((o, i) =>
+        `<button type="button" class="opt-btn" data-act="qz-pick" data-i="${i}"><span class="opt-key">${'ABCD'[i] || i + 1}</span>${esc(o)}</button>`).join('')}</div>
+      <div id="qz-fb"></div>
+    </div>`);
+  }
+
+  function quizPick(i) {
+    if (!quiz || quiz.answered) return;
+    const q = quiz.items[quiz.idx].q;
+    quiz.answered = true;
+    const ok = i === q.answer;
+    recordAttempt(q.kpId, q.id, ok, ok ? '' : '方法不会');
+    if (ok) quiz.correct++;
+    else quiz.wrong.push({ kpId: q.kpId, stem: q.stem, explain: q.explain, errorType: '方法不会' });
+    $$('#qz-opts .opt-btn').forEach((b, bi) => {
+      if (bi === q.answer) b.classList.add('right');
+      else if (bi === i && !ok) b.classList.add('wrong');
+    });
+    const last = quiz.idx + 1 >= quiz.items.length;
+    $('#qz-fb').innerHTML = `
+      <div class="explain-box"><b style="color:${ok ? 'var(--green)' : 'var(--red)'}">${ok ? '✓ 答对了' : '✗ 答错了，正确答案是 ' + ('ABCD'[q.answer] || q.answer + 1)}</b>${q.explain ? '<br>' + esc(q.explain) : ''}</div>
+      <div style="display:flex;justify-content:flex-end;margin-top:12px">
+        <button class="btn primary sm" data-act="qz-next">${last ? '完成练习' : '下一题'}</button>
+      </div>`;
+    Store.save();
+  }
+
+  function quizNext() {
+    if (!quiz) return;
+    quiz.answered = false;
+    quiz.idx++;
+    if (quiz.idx >= quiz.items.length) finishQuiz();
+    else renderQuizStep();
+  }
+
+  function quizSelf(ok) {
+    if (!quiz) return;
+    const it = quiz.items[quiz.idx];
+    recordAttempt(it.kpId, '', ok, ok ? '' : '概念不清');
+    if (ok) quiz.correct++;
+    else quiz.wrong.push({ kpId: it.kpId, stem: '', errorType: '概念不清' });
+    quiz.idx++;
+    if (quiz.idx >= quiz.items.length) finishQuiz();
+    else renderSelfStep();
+  }
+
+  function finishQuiz() {
+    const n = quiz.items.length;
+    const c = quiz.correct;
+    const pct = n ? Math.round(c / n * 100) : 0;
+    lastQuizWrong = quiz.wrong.slice();
+    quiz = null;
+    const msg = pct === 100 ? '完美，这个知识点可以放心了' : pct >= 80 ? '很扎实，保持节奏'
+      : pct >= 60 ? '有印象但不牢，明天再复习一轮' : '建议重看概念，再做一轮题';
+    openModal(`
+    <div class="modal-head">练习完成</div>
+    <div class="modal-body">
+      <div style="text-align:center;margin-bottom:16px">
+        <b style="font-size:42px;line-height:1.2;color:${pct >= 80 ? 'var(--green)' : pct >= 60 ? 'var(--amber)' : 'var(--red)'}">${c}<span class="muted" style="font-size:20px">/${n}</span></b>
+        <div class="sm muted">正确率 ${pct}% · ${msg}</div>
+      </div>
+      ${lastQuizWrong.length ? `
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);margin-bottom:6px">
+        <input type="checkbox" id="qz-mk" checked style="width:auto">
+        把答错的 ${lastQuizWrong.length} 项写入错题本<span class="muted sm">（对应知识点明天进入复习队列）</span>
+      </label>` : ''}
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost sm" data-act="modal-x">关闭</button>
+      <button class="btn primary sm" data-act="qz-done-save">保存结果</button>
+    </div>`);
+  }
+
+  function saveQuizResult() {
+    const w = lastQuizWrong;
+    lastQuizWrong = [];
+    const doMk = $('#qz-mk') && $('#qz-mk').checked;
+    if (doMk) {
+      w.forEach(wi => {
+        const p = Engine.kp(wi.kpId);
+        if (!p) return;
+        const desc = wi.stem
+          ? '【练习错题】' + wi.stem + (wi.explain ? '\n解析：' + wi.explain : '')
+          : '【快速自测】未能独立回忆出「' + p.name + '」的核心内容';
+        Engine.addMistake(wi.kpId, wi.errorType || '概念不清', desc);
+      });
+    }
+    Store.save();
+    closeModal();
+    toast(doMk && w.length ? `已写入 ${w.length} 条错题，相关知识点明天复习` : '练习结果已记录', 'success');
+  }
+
+  function openQAddModal() {
+    const S = Store.state;
+    if (!S.courses.length) { toast('请先到「知识树」创建课程和知识点', 'error'); return; }
+    openModal(`
+    <div class="modal-head">手动加题</div>
+    <form id="f-qadd">
+      <div class="modal-body">
+        <div class="grid2">
+          <div class="field"><label>课程</label>
+            <select id="f-qadd-course" name="course">${S.courses.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>
+          <div class="field"><label>知识点</label><select id="f-qadd-kp" name="kp"></select></div>
+        </div>
+        <div class="field"><label>题干</label><textarea name="stem" rows="3" required placeholder="例如：下列关于无穷小量的说法，正确的是？"></textarea></div>
+        ${['A', 'B', 'C', 'D'].map(k => `
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:9px">
+          <label style="margin:0;width:20px;text-align:center;font-weight:700;color:var(--muted)">${k}</label>
+          <input name="opt${k}" required placeholder="选项 ${k}" style="flex:1">
+        </div>`).join('')}
+        <div class="grid2">
+          <div class="field"><label>正确答案</label>
+            <select name="ans"><option value="0">A</option><option value="1">B</option><option value="2">C</option><option value="3">D</option></select></div>
+          <div class="field"><label>解析（选填）</label><input name="explain" placeholder="为什么选它"></div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn ghost sm" data-act="modal-x">取消</button>
+        <button class="btn primary sm" type="submit">存入题库</button>
+      </div>
+    </form>`);
+    fillKpInto('#f-qadd-kp', S.courses[0].id);
+  }
+
+  function openQGenModal(preKpId) {
+    const S = Store.state;
+    if (!S.courses.length) { toast('请先到「知识树」创建课程和知识点', 'error'); return; }
+    openModal(`
+    <div class="modal-head">AI 批量出题</div>
+    <form id="f-qgen">
+      <div class="modal-body">
+        <div class="grid2">
+          <div class="field"><label>课程</label>
+            <select id="f-qgen-course" name="course">${S.courses.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>
+          <div class="field"><label>知识点</label><select id="f-qgen-kp" name="kp"></select></div>
+        </div>
+        <div class="grid2">
+          <div class="field"><label>题目数量</label>
+            <select name="count"><option value="3" selected>3 道</option><option value="5">5 道</option><option value="8">8 道</option></select></div>
+          <div class="field"><label>难度</label>
+            <select name="diff"><option>基础</option><option selected>进阶</option><option>挑战</option></select></div>
+        </div>
+        <div class="sub">生成的题目会存入题库反复使用；答错的题建议顺手写入错题本。</div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn ghost sm" data-act="modal-x">取消</button>
+        <button class="btn primary sm" type="submit">生成并开始练习</button>
+      </div>
+    </form>`);
+    if (preKpId) {
+      const p = Engine.kp(preKpId);
+      if (p) $('#f-qgen-course').value = p.courseId;
+    }
+    fillKpInto('#f-qgen-kp', $('#f-qgen-course').value, preKpId);
+  }
+
+  const VIEWS = { today: vToday, tools: vTools, tree: vTree, practice: vPractice, mistakes: vMistakes, data: vData, growth: vGrowth, settings: vSettings };
 
   function render() {
     $$('#nav button').forEach(b => b.classList.toggle('active', b.dataset.view === view));
     const dot = $('#api-dot'), lab = $('#api-label');
     dot.classList.toggle('on', AI.ready());
     const ap = Store.state.api;
-    lab.textContent = !AI.ready() ? 'AI 未配置'
-      : (ap.preset === 'pollinations' && !ap.key) ? 'AI 免费体验中'
-      : 'AI 已连接 · ' + ap.model;
+    lab.textContent = !AI.ready() ? 'AI 未配置' : 'AI 已连接 · ' + ap.model;
     $('#main').innerHTML = (VIEWS[view] || vToday)();
     renderChat();
   }
 
   function renderChat() {
+    const box = $('#chat-msgs');
+    if (!box) return;
     const st = $('#agent-status');
-    st.textContent = AI.ready() ? '在线' : '未配置 API';
+    if (st) st.textContent = AI.ready() ? '在线' : '未配置 API';
     const msgs = Store.state.chat.slice(-40);
     $('#chat-msgs').innerHTML = msgs.length
-      ? msgs.map(m => `<div class="msg ${m.role === 'user' ? 'user' : 'bot'}">${mdToHtml(m.content)}</div>`).join('')
-      : '<div class="msg bot">你好，我是你的 Study Agent。可以问我：「我只有1小时该怎么安排」「我最近哪里最薄弱」「考试风险怎么样」。也可以直接让我重排今天的计划。</div>';
+      ? msgs.map(m => {
+          const bubble = `<div class="msg ${m.role === 'user' ? 'user' : 'bot'}">${mdToHtml(m.content)}</div>`;
+          if (m.role === 'assistant' && Array.isArray(m.actions) && m.actions.length) {
+            return bubble + '<div class="agent-acts">' + m.actions.map((a, i) => actionCardHtml(m, a, i)).join('') + '</div>';
+          }
+          return bubble;
+        }).join('')
+      : '<div class="msg bot">你好，我是你的 Study Agent。我看得见你的全部学习数据，可以直接操作学习系统：\n· 「我只有1小时，帮我重排今天」\n· 「未来5天每天2小时，帮我冲刺高数」→ 多日计划\n· 「帮我练练极限」→ 生成练习题\n· 「把无穷小加入明天复习」\n所有写操作都会先征求你的确认。</div>';
     $('#chat-chips').innerHTML = [
       '我只有1小时，帮我重排今天',
       '我最近最薄弱的地方是什么？',
       '帮我分析一下这周的状态',
       '考试快到了怎么办'
     ].map(t => `<span class="chip" data-ask="${esc(t)}">${esc(t)}</span>`).join('');
-    const box = $('#chat-msgs');
     box.scrollTop = box.scrollHeight;
+  }
+
+  function isEmptyState() {
+    const S = Store.state;
+    return !S.courses.length && !S.kps.length && !S.logs.length && !S.mistakes.length;
+  }
+
+  function openWelcome() {
+    openModal(`
+    <div class="modal-head">欢迎使用 学习OS</div>
+    <div class="modal-body">
+      <p class="sm muted" style="line-height:1.9;margin-bottom:6px">这是你的<b>个人学习操作系统</b>：记录学习 → 分析薄弱 → 规划行动，它会主动告诉你今天最该学什么。</p>
+      <p class="sm muted" style="line-height:1.9">建议先载入一套试用数据（含课程、题库、练习记录、课表等），30 秒看懂全部功能。</p>
+      <div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap">
+        <button class="btn primary sm" data-act="welcome-demo">🚀 载入试用数据</button>
+        <button class="btn ghost sm" data-act="welcome-blank">从零开始，先设定目标</button>
+      </div>
+      <div class="sub" style="margin-top:14px">试用数据随时可在「设置 → 数据管理」清除或导出。</div>
+    </div>`);
   }
 
   function onboard() {
@@ -1023,7 +1633,7 @@ const App = (() => {
     <div class="modal-head">欢迎来到 学习OS</div>
     <form id="f-onboard">
       <div class="modal-body">
-        <p class="muted sm" style="margin-bottom:14px">告诉我你的目标，Study Agent 会据此为你规划每天的学习。所有数据只保存在本机浏览器。</p>
+        <p class="muted sm" style="margin-bottom:14px">告诉我你的目标，Study Agent 会据此为你规划每天的学习。${Store.transport === 'api' ? '数据将保存到服务器，登录同一账号即可多设备继续。' : '所有数据只保存在本机浏览器。'}</p>
         <div class="field"><label>昵称</label><input name="name" placeholder="怎么称呼你？"></div>
         <div class="field"><label>本学期核心目标</label>
           <select name="goal">${GOALS.map(g => `<option>${g}</option>`).join('')}</select></div>
@@ -1037,6 +1647,28 @@ const App = (() => {
     </form>`);
   }
 
+  function openAuthModal(mode) {
+    const isReg = mode === 'reg';
+    openModal(`
+    <div class="modal-head">学习OS 账户</div>
+    <form id="f-auth" data-mode="${isReg ? 'register' : 'login'}">
+      <div class="modal-body">
+        <div style="display:flex;gap:8px;margin-bottom:16px">
+          <button type="button" class="btn sm ${isReg ? 'ghost' : 'primary'}" data-act="auth-tab" data-m="login">登录</button>
+          <button type="button" class="btn sm ${isReg ? 'primary' : 'ghost'}" data-act="auth-tab" data-m="reg">注册新账户</button>
+        </div>
+        <div class="field"><label>用户名</label><input name="username" required autocomplete="username"></div>
+        <div class="field"><label>密码（至少 6 位）</label><input name="password" type="password" required minlength="6" autocomplete="${isReg ? 'new-password' : 'current-password'}"></div>
+        ${isReg ? '<div class="field"><label>昵称（可选）</label><input name="display_name" placeholder="怎么称呼你？"></div>' : ''}
+        <div id="auth-err" class="sm" style="color:var(--red);min-height:18px;margin-bottom:6px"></div>
+        <div class="sub">已检测到本地后端服务：学习数据将保存到服务器数据库，换设备登录即可继续。</div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn primary sm" type="submit">${isReg ? '注册并进入' : '登录'}</button>
+      </div>
+    </form>`);
+  }
+
   function openCheckin(ctxIn) {
     ckCtx = Object.assign({}, ctxIn, { rating: 'good' });
     const p = Engine.kp(ctxIn.kpId);
@@ -1045,9 +1677,9 @@ const App = (() => {
     <div class="modal-body">
       <div class="field"><label>这次学得怎么样？</label>
         <div class="seg" id="ck-seg">
-          <button type="button" data-r="good" class="on">掌握了</button>
-          <button type="button" data-r="ok">有点模糊</button>
-          <button type="button" data-r="bad">没学会</button>
+          <button type="button" data-act="ck-rate" data-r="good" class="on">掌握了</button>
+          <button type="button" data-act="ck-rate" data-r="ok">有点模糊</button>
+          <button type="button" data-act="ck-rate" data-r="bad">没学会</button>
         </div>
       </div>
       <div class="grid2">
@@ -1337,31 +1969,28 @@ const App = (() => {
     const t = forcedText || inp.value.trim();
     if (!t || chatting) return;
     if (!AI.ready()) {
-      toast('请先在「设置」中配置 AI 接口', 'error');
+      toast('请先在「设置」中接入 AI 服务', 'error');
       return;
     }
     chatting = true;
     inp.value = '';
-    Store.state.chat.push({ role: 'user', content: t });
+    Store.state.chat.push({ id: Store.uid(), role: 'user', content: t });
     renderChat();
     $('#chat-msgs').insertAdjacentHTML('beforeend', '<div class="msg bot" id="chat-typing">思考中…</div>');
     const box = $('#chat-msgs');
     box.scrollTop = box.scrollHeight;
     try {
-      const replanIntent = /(重新?(规划|排)|安排.{0,4}今天|重排|只有\s*\d+\s*(小时|分钟)|只剩\s*\d+\s*(小时|分钟))/.test(t);
-      let reply;
-      if (replanIntent) {
-        const plan = await AI.genPlan(t);
-        Engine.applyPlan(plan, 'ai');
-        reply = '已按你的情况重排今日计划：\n'
-          + plan.items.map(i => `- ${i.title}（${i.minutes}min）：${i.reason}`).join('\n')
-          + (plan.note ? `\n\n${plan.note}` : '');
-        Store.save();
-      } else {
-        reply = await AI.ask(t);
-        Store.save();
+      let r;
+      try {
+        r = await AI.agentAct(t);
+      } catch (e1) {
+        const fallback = await AI.ask(t);
+        r = { reply: fallback + '\n\n（本次以纯问答模式回答，操作模式暂不可用：' + e1.message + '）', actions: [] };
       }
-      Store.state.chat.push({ role: 'assistant', content: reply });
+      Store.state.chat.push({
+        id: Store.uid(), role: 'assistant', content: r.reply,
+        actions: (r.actions || []).map(a => Object.assign({ done: false }, a))
+      });
       Store.save();
     } catch (e) {
       Store.state.chat.push({ role: 'assistant', content: '请求失败：' + e.message });
@@ -1369,6 +1998,132 @@ const App = (() => {
     } finally {
       chatting = false;
       renderChat();
+    }
+  }
+
+  function actionLabel(a) {
+    switch (a.type) {
+      case 'create_tasks': {
+        const items = Array.isArray(a.items) ? a.items : [];
+        return '创建 ' + items.length + ' 个今日任务' + (items[0] ? '：' + items.slice(0, 3).map(x => x.title).join('、') : '');
+      }
+      case 'replan_today':
+        return '按你的情况重排今日计划' + (a.constraint ? '「' + a.constraint + '」' : '');
+      case 'generate_practice': {
+        const p = Engine.kp(a.kpId);
+        return '为「' + (p ? p.name : a.query || '?') + '」生成 ' + (Number(a.count) || 3) + ' 道练习题';
+      }
+      case 'add_review_tomorrow': {
+        const p = Engine.kp(a.kpId);
+        return '把「' + (p ? p.name : a.query || '?') + '」加入明天复习队列';
+      }
+      case 'plan_days': {
+        const days = Array.isArray(a.days) ? a.days : [];
+        const n = days.reduce((s2, d2) => s2 + ((d2 && d2.items) || []).length, 0);
+        return '生成 ' + days.length + ' 天学习计划，共 ' + n + ' 项任务';
+      }
+      default:
+        return '未知操作：' + esc(a.type);
+    }
+  }
+
+  function actionCardHtml(m, a, i) {
+    if (a.done) {
+      return `<div class="agent-act">
+        <span class="sm grow">${actionLabel(a)}</span>
+        <span class="tag ${a.skipped ? 'gray' : 'green'}">${a.skipped ? '已跳过' : '已执行'}</span>
+      </div>`;
+    }
+    return `<div class="agent-act">
+      <span class="sm grow">${actionLabel(a)}</span>
+      <button class="btn primary sm" data-act="agent-run" data-mid="${m.id}" data-i="${i}">确认执行</button>
+      <button class="mini" data-act="agent-skip" data-mid="${m.id}" data-i="${i}">跳过</button>
+    </div>`;
+  }
+
+  async function runAgentAction(mid, i) {
+    const m = Store.state.chat.find(x => x.id === mid);
+    if (!m || !m.actions || !m.actions[i] || m.actions[i].done) return;
+    const a = m.actions[i];
+    try {
+      await execAgentAction(a);
+      a.done = true;
+      Store.logEvent('agent_action', a.kpId || '', { type: a.type });
+      Store.save();
+      toast('Agent 操作已执行', 'success');
+    } catch (e) {
+      toast('执行失败：' + e.message, 'error');
+    }
+  }
+
+  function skipAgentAction(mid, i) {
+    const m = Store.state.chat.find(x => x.id === mid);
+    if (!m || !m.actions || !m.actions[i] || m.actions[i].done) return;
+    m.actions[i].done = true;
+    m.actions[i].skipped = true;
+    Store.save();
+  }
+
+  async function execAgentAction(a) {
+    const S = Store.state;
+    switch (a.type) {
+      case 'create_tasks': {
+        const validIds = new Set(S.kps.map(p => p.id));
+        (Array.isArray(a.items) ? a.items : []).forEach(it => {
+          it = it || {};
+          S.planItems.push({
+            id: Store.uid(),
+            kpId: it.kpId && validIds.has(it.kpId) ? it.kpId : '',
+            title: String(it.title || 'Agent 任务').slice(0, 60),
+            minutes: Math.max(5, Math.min(120, Number(it.minutes) || 25)),
+            tag: TAGC[it.tag] ? it.tag : '薄弱推进',
+            reason: String(it.reason || '来自 Agent 建议').slice(0, 120),
+            done: false, source: 'agent'
+          });
+        });
+        S.planDate = Engine.today();
+        break;
+      }
+      case 'replan_today':
+        await doGen(String(a.constraint || ''));
+        break;
+      case 'generate_practice': {
+        const kp = Engine.kp(a.kpId) || (a.query ? AI.findKp(a.query) : null);
+        if (!kp) throw new Error('找不到对应知识点');
+        await genAndStart(kp.id, Math.max(1, Math.min(8, Number(a.count) || 3)), a.difficulty || '进阶');
+        break;
+      }
+      case 'add_review_tomorrow': {
+        const p = Engine.kp(a.kpId) || (a.query ? AI.findKp(a.query) : null);
+        if (!p) throw new Error('找不到对应知识点');
+        p.stage = 0;
+        p.nextReview = Engine.addDays(Engine.today(), 1);
+        break;
+      }
+      case 'plan_days': {
+        const validIds = new Set(S.kps.map(p => p.id));
+        const days = Array.isArray(a.days) ? a.days : [];
+        days.forEach(day => {
+          const date = String((day && day.date) || '').slice(0, 10);
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+          ((day.items) || []).forEach(it => {
+            it = it || {};
+            S.planItems.push({
+              id: Store.uid(),
+              kpId: it.kpId && validIds.has(it.kpId) ? it.kpId : '',
+              title: String(it.title || '学习任务').slice(0, 60),
+              minutes: Math.max(5, Math.min(240, Number(it.minutes) || 30)),
+              tag: TAGC[it.tag] ? it.tag : '薄弱推进',
+              reason: String(it.reason || 'Agent 多日规划').slice(0, 120),
+              done: false, source: 'agent',
+              planDate: date
+            });
+          });
+        });
+        break;
+      }
+      default:
+        throw new Error('不支持的操作类型：' + a.type);
     }
   }
 
@@ -1414,6 +2169,16 @@ const App = (() => {
       case 'kp-add': openKpModal(btn.dataset.course); break;
       case 'kp-checkin': openCheckin({ kpId: id }); break;
       case 'kp-mistake': openMistakeModal(id); break;
+      case 'kp-practice': startSelfTest(id); break;
+      case 'kp-star': {
+        const sp = Engine.kp(id);
+        if (sp) {
+          sp.importance = (sp.importance || 0) >= 4 ? 3 : 5;
+          Store.save();
+          toast(sp.importance >= 4 ? '已标为核心知识点，规划与练习权重将提升' : '已取消核心标记');
+        }
+        break;
+      }
       case 'kp-del':
         if (confirm('删除该知识点？')) {
           Store.state.kps = Store.state.kps.filter(p => p.id !== id);
@@ -1436,6 +2201,47 @@ const App = (() => {
         break;
       case 'report-week': await weekly(); break;
       case 'report-risk': await risk(); break;
+      case 'prac-self': startSelfTest(id); break;
+      case 'prac-gen-kp': openQGenModal(id); break;
+      case 'q-gen-open': openQGenModal(); break;
+      case 'q-add-open': openQAddModal(); break;
+      case 'prac-one': startSet([id]); break;
+      case 'prac-set': {
+        const ids = Store.state.questions
+          .filter(q => { const p = Engine.kp(q.kpId); return p && p.courseId === id; })
+          .map(q => q.id);
+        startSet(ids);
+        break;
+      }
+      case 'q-del':
+        Store.state.questions = Store.state.questions.filter(q => q.id !== id);
+        Store.save();
+        break;
+      case 'qz-pick': quizPick(Number(btn.dataset.i)); break;
+      case 'qz-next': quizNext(); break;
+      case 'qz-self': quizSelf(btn.dataset.ok === '1'); break;
+      case 'qz-done-save': saveQuizResult(); break;
+      case 'insight-go': {
+        const kind = btn.dataset.kind;
+        if ((kind === 'practice' || kind === 'mission') && id) startSelfTest(id);
+        else { view = kind === 'review' ? 'tree' : 'practice'; render(); }
+        break;
+      }
+      case 'agent-run': await runAgentAction(btn.dataset.mid, Number(btn.dataset.i)); break;
+      case 'agent-skip': skipAgentAction(btn.dataset.mid, Number(btn.dataset.i)); break;
+      case 'auth-tab': openAuthModal(btn.dataset.m); break;
+      case 'logout':
+        Store.Auth.clear();
+        location.reload();
+        break;
+      case 'data-range':
+        dataRange = Number(btn.dataset.n) || 7;
+        render();
+        break;
+      case 'nav-jump':
+        view = btn.dataset.view || 'today';
+        render();
+        break;
       case 'api-test': await testApi(); break;
       case 'notif-open': openNotif(); break;
       case 'about-open': openAbout(); break;
@@ -1539,14 +2345,8 @@ const App = (() => {
         break;
       case 'wipe':
         if (confirm('确定清空全部学习数据？此操作不可恢复！')) {
-          Store.state = {
-            profile: { name: '', goal: '', major: '', dailyMinutes: 180 },
-            api: Store.state.api,
-            courses: [], kps: [], logs: [], mistakes: [],
-            planDate: null, planItems: [], planNote: '',
-            reports: [], chat: []
-          };
-          Store.save();
+          Store.wipe();
+          view = 'today';
           onboard();
           toast('已清空学习数据', 'success');
         }
@@ -1556,6 +2356,17 @@ const App = (() => {
         Store.save();
         closeModal();
         toast('示例数据已载入', 'success');
+        break;
+      case 'welcome-demo':
+        Store.seedDemo();
+        Store.save();
+        closeModal();
+        view = 'today';
+        toast('试用数据已载入！建议按侧栏顺序逛一遍：知识树 → 练习室 → 学习数据', 'success');
+        break;
+      case 'welcome-blank':
+        closeModal();
+        onboard();
         break;
     }
   });
@@ -1583,6 +2394,10 @@ const App = (() => {
       $('#ck-mk-box').style.display = t.checked ? '' : 'none';
     } else if (t.id === 'f-mk-course') {
       fillKpSelect(t.value);
+    } else if (t.id === 'f-qadd-course') {
+      fillKpInto('#f-qadd-kp', t.value);
+    } else if (t.id === 'f-qgen-course') {
+      fillKpInto('#f-qgen-kp', t.value);
     } else if (t.id === 'import-file') {
       const f = t.files[0];
       if (!f) return;
@@ -1602,7 +2417,7 @@ const App = (() => {
 
   document.addEventListener('submit', async e => {
     const f = e.target;
-    if (!['f-profile', 'f-api', 'f-replan', 'f-task', 'f-course', 'f-kp', 'f-mistake', 'f-onboard', 'f-todo', 'f-sched', 'f-cd', 'chat-form'].includes(f.id)) return;
+    if (!['f-profile', 'f-api', 'f-replan', 'f-task', 'f-course', 'f-kp', 'f-mistake', 'f-onboard', 'f-todo', 'f-sched', 'f-cd', 'chat-form', 'f-qadd', 'f-qgen', 'f-auth'].includes(f.id)) return;
     e.preventDefault();
     const d = new FormData(f);
     switch (f.id) {
@@ -1789,6 +2604,56 @@ const App = (() => {
       case 'chat-form':
         sendChat();
         break;
+      case 'f-qadd': {
+        const kpId = d.get('kp');
+        if (!kpId) { toast('请选择知识点', 'error'); return; }
+        const opts = ['A', 'B', 'C', 'D'].map(k => String(d.get('opt' + k) || '').trim());
+        const stem = String(d.get('stem') || '').trim();
+        if (!stem) { toast('请填写题干', 'error'); return; }
+        if (opts.some(o => !o)) { toast('请填全 A/B/C/D 四个选项', 'error'); return; }
+        Store.state.questions.push({
+          id: Store.uid(), kpId, type: 'choice',
+          stem, options: opts,
+          answer: Math.max(0, Math.min(3, Number(d.get('ans')) || 0)),
+          explain: String(d.get('explain') || '').trim(),
+          source: 'manual', createdAt: Engine.today()
+        });
+        Store.save();
+        closeModal();
+        toast('题目已存入题库，可到「我的题库」开练', 'success');
+        break;
+      }
+      case 'f-qgen': {
+        const kpId = d.get('kp');
+        if (!kpId) { toast('该课程还没有知识点，先到知识树添加', 'error'); return; }
+        await genAndStart(kpId, Number(d.get('count')) || 3, d.get('diff'));
+        break;
+      }
+      case 'f-auth': {
+        const mode = f.dataset.mode === 'register' ? 'register' : 'login';
+        const username = String(d.get('username') || '').trim().toLowerCase();
+        const password = String(d.get('password') || '');
+        const errEl = $('#auth-err');
+        if (!username) { errEl.textContent = '请填写用户名'; return; }
+        if (password.length < 6) { errEl.textContent = '密码至少 6 位'; return; }
+        const body = mode === 'register'
+          ? { username, password, display_name: String(d.get('display_name') || '').trim() }
+          : { username, password };
+        try {
+          errEl.textContent = '请稍候…';
+          const r = await Store.apiFetch('/api/auth/' + mode, { method: 'POST', body });
+          Store.Auth.set(r.token);
+          const snap = await Store.apiFetch('/api/state');
+          Store.hydrate(snap);
+          closeModal();
+          afterBoot();
+          toast(`欢迎，${r.display_name || r.username}`, 'success');
+        } catch (e) {
+          errEl.textContent = e.status === 409 ? '用户名已被占用，换一个试试'
+            : e.status === 401 ? '用户名或密码错误' : e.message;
+        }
+        break;
+      }
     }
   });
 
@@ -1803,8 +2668,28 @@ const App = (() => {
     }
   });
 
-  function init() {
-    if (!Store.state.profile.name) onboard();
+  async function init() {
+    try { await Store.detectTransport(); } catch (e) {}
+    if (Store.transport === 'api') {
+      if (!Store.Auth.tok()) { openAuthModal('login'); return; }
+      try {
+        const snap = await Store.apiFetch('/api/state');
+        Store.hydrate(snap);
+      } catch (e) {
+        if (e.status === 401) {
+          Store.Auth.clear();
+          openAuthModal('login');
+          return;
+        }
+        toast('云端同步失败，本次以本机数据运行', 'error');
+      }
+    }
+    afterBoot();
+  }
+
+  function afterBoot() {
+    if (isEmptyState()) openWelcome();
+    else if (!Store.state.profile.name) onboard();
     render();
     setTimeout(async () => {
       try {
@@ -1817,8 +2702,8 @@ const App = (() => {
     }, 1500);
   }
 
-  init();
   window.App = { render };
+  init();
 
   return { render };
 })();

@@ -1,30 +1,36 @@
 const AI = (() => {
   const PRESETS = {
-    pollinations: { label: '免费体验（无需 Key，公共接口较慢）', base: 'https://text.pollinations.ai', endpoint: 'https://text.pollinations.ai/openai', model: 'openai', noKey: true },
-    deepseek: { label: 'DeepSeek（推荐，便宜）', base: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
-    zhipu: { label: '智谱 GLM（有免费额度）', base: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
-    kimi: { label: 'Moonshot Kimi', base: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
-    openai: { label: 'OpenAI', base: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+    gemini: { label: 'Google Gemini（免费额度大 · 推荐）', base: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.0-flash', keyUrl: 'https://aistudio.google.com/apikey' },
+    deepseek: { label: 'DeepSeek（便宜稳定）', base: 'https://api.deepseek.com/v1', model: 'deepseek-chat', keyUrl: 'https://platform.deepseek.com/api_keys' },
+    zhipu: { label: '智谱 GLM（有免费模型）', base: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4.7-flash', keyUrl: 'https://open.bigmodel.cn/usercenter/apikeys' },
+    kimi: { label: 'Moonshot Kimi', base: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k', keyUrl: 'https://platform.moonshot.cn/console/api-keys' },
+    openai: { label: 'OpenAI', base: 'https://api.openai.com/v1', model: 'gpt-4o-mini', keyUrl: 'https://platform.openai.com/api-keys' },
     custom: { label: '自定义（任意 OpenAI 兼容接口）', base: '', model: '' }
   };
 
   const cfg = () => Store.state.api;
   const ready = () => {
     const c = cfg();
-    const p = PRESETS[c.preset];
-    const needKey = !(p && p.noKey);
-    return !!(c.base && c.model && (!needKey || c.key));
+    return !!(c.base && c.model && c.key);
   };
 
   async function chat(messages, opt) {
     opt = opt || {};
+    if (!ready()) throw new Error('未配置 AI：请到「设置」选择服务商并填写 API Key');
     const c = cfg();
-    if (!ready()) throw new Error('未配置 API，请到「设置」填写');
-    const body = {
-      model: c.model,
-      messages,
-      temperature: typeof opt.temperature === 'number' ? opt.temperature : 0.4
-    };
+    const temperature = typeof opt.temperature === 'number' ? opt.temperature : 0.4;
+    const maxTokens = opt.maxTokens || undefined;
+
+    // B3：云模式下走服务端代理，Key 不经过浏览器直连
+    if (typeof Store !== 'undefined' && Store.transport === 'api') {
+      const r = await Store.apiFetch('/api/ai/chat', {
+        method: 'POST',
+        body: { messages, temperature, max_tokens: maxTokens, json_mode: !!opt.json }
+      });
+      return r.content;
+    }
+
+    const body = { model: c.model, messages, temperature };
     if (opt.json) body.response_format = { type: 'json_object' };
     if (opt.maxTokens) body.max_tokens = opt.maxTokens;
     const pr = PRESETS[c.preset];
@@ -33,17 +39,31 @@ const AI = (() => {
     async function doFetch(b) {
       const headers = { 'Content-Type': 'application/json' };
       if (c.key) headers.Authorization = 'Bearer ' + c.key;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(b)
-      });
+      const ctrl = ('AbortController' in window) ? new AbortController() : null;
+      const timer = ctrl ? setTimeout(() => ctrl.abort(), opt.timeout || 45000) : null;
+      let res;
+      try {
+        res = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(b),
+          signal: ctrl ? ctrl.signal : undefined
+        });
+      } catch (err) {
+        if (timer) clearTimeout(timer);
+        if (ctrl && err.name === 'AbortError') throw new Error('请求超时（45 秒），请重试或换服务商');
+        throw new Error('网络请求失败：请检查网络或该接口是否允许浏览器跨域调用');
+      }
+      if (timer) clearTimeout(timer);
       if (!res.ok) {
         let msg = 'HTTP ' + res.status;
         try {
           const j = await res.json();
           if (j.error && j.error.message) msg = j.error.message;
         } catch (e) {}
+        if (res.status === 401 || res.status === 403) msg = '鉴权失败：请检查 API Key 是否正确（' + msg + '）';
+        else if (res.status === 402) msg = '额度不足或通道已停用：请更换服务商（' + msg + '）';
+        else if (res.status === 429) msg = '请求过快或额度耗尽：稍后再试（' + msg + '）';
         const err = new Error(msg);
         err.status = res.status;
         throw err;
@@ -270,9 +290,92 @@ const AI = (() => {
     return extractJSON(txt);
   }
 
+  async function genQuestions(kpId, count, difficulty) {
+    const p = Engine.kp(kpId);
+    if (!p) throw new Error('知识点不存在');
+    const parts = [Engine.courseName(p.courseId), p.chapter, p.name].filter(Boolean);
+    const sys = [
+      '你是大学课程出题引擎。针对指定知识点出高质量的单选题，用于主动回忆练习。',
+      '要求：',
+      '- 题目考查核心概念的理解与应用，不要死记硬背型题目；',
+      `- 难度定位：${difficulty || '进阶'}（基础=概念辨析，进阶=理解应用，挑战=综合推理）；`,
+      '- 4 个选项中只有 1 个正确；干扰项要有迷惑性（常见误解）；',
+      '- explain 用两三句话讲透为什么，点出错误选项错在哪。'
+    ].join('\n');
+    const user = `知识点：${parts.join(' / ')}\n学生当前掌握度：${p.mastery}%，历史错题 ${p.errCount} 次\n请出 ${count || 3} 道题。`;
+    const txt = await chat(
+      [{ role: 'system', content: sys }, { role: 'user', content: user }],
+      { json: true, temperature: 0.6, maxTokens: 1800 }
+    );
+    const obj = extractJSON(txt);
+    const raw = Array.isArray(obj) ? obj : (obj.questions || []);
+    return raw.map(q => ({
+      stem: q.stem || q.question || '',
+      options: (q.options || []).map(String),
+      answer: Math.max(0, Math.min(3, Number(q.answer) || 0)),
+      explain: q.explain || ''
+    })).filter(q => q.stem && q.options.length >= 2);
+  }
+
+  function findKp(query) {
+    const q = String(query || '').trim().toLowerCase();
+    if (!q) return null;
+    const kps = Store.state.kps;
+    let best = null, bestScore = 0;
+    kps.forEach(p => {
+      const name = (p.name || '').toLowerCase();
+      const chapter = (p.chapter || '').toLowerCase();
+      const course = Engine.courseName(p.courseId).toLowerCase();
+      let s = 0;
+      if (name === q) s = 100;
+      else if (name.includes(q)) s = 80 - Math.min(name.length - q.length, 20);
+      else if (chapter.includes(q)) s = 55;
+      else if (course.includes(q)) s = 30;
+      if (s > bestScore) { bestScore = s; best = p; }
+    });
+    return bestScore >= 25 ? best : null;
+  }
+
+  async function agentAct(userText) {
+    const sys = [
+      '你是 StudyOS 的学习 Agent，能读取学生的全部学习数据，并对其学习系统执行操作。',
+      '你可以使用以下工具（所有写操作都以 actions 返回，用户确认后才会真正执行）：',
+      '1. create_tasks —— 创建今日学习任务。参数 items:[{"title":"课程 · 知识点","kpId":"知识点id或空","minutes":25,"tag":"到期复习/薄弱推进/新学/练习","reason":"理由"}]',
+      '2. replan_today —— 按约束重排今日计划。参数 {"constraint":"约束文本"}',
+      '3. generate_practice —— 为知识点生成练习题并开始练习。参数 {"kpId":"知识点id","count":3,"difficulty":"基础/进阶/挑战"}',
+      '4. add_review_tomorrow —— 把知识点加入明天复习队列。参数 {"kpId":"知识点id"}',
+      '5. plan_days —— 多日学习计划（用户说"未来N天/每天只有X小时/几天后考试"时使用）。参数 {"days":[{"date":"YYYY-MM-DD","items":[{"title":"课程 · 知识点","kpId":"id或空","minutes":30,"tag":"薄弱推进/到期复习/新学/练习","reason":"理由"}]}]}，日期从明天开始连续排列，总时长不超过用户每日可用时间。',
+      '要求：',
+      '- 先判断用户意图，再决定回复方式：',
+      '  · 提问/求解释（为什么/是什么/怎么办/哪个更值得）：直接回答问题本身，给出基于数据的解释和推理，actions 留空数组。禁止以"我将为您…"开头，禁止把回答变成执行动作的宣告；',
+      '  · 只有用户明确要求改动（重排计划/创建任务/出题/加入复习）时，才返回对应 actions，并在 reply 里说明你准备做什么，等待确认；',
+      '- 回复必须基于学生真实数据下结论，引用具体数字；',
+      '- kpId 必须来自学生数据中的 id；用户提到知识点名称时自行匹配；',
+      '- 需要多个动作时按执行顺序放入 actions；',
+      '- 示例：用户问"为什么专注薄弱环节能提高效率"，正确回复类似 {"reply":"从你的数据看，薄弱知识点掌握度多在40%~50%，而已掌握90%的内容重做收益接近零。学习收益边际递减：同样35分钟，把掌握度40%提到70%带来的提分空间，远大于把90%提到95%。所以优先补弱项性价比最高。","actions":[]}；错误回复是"为了提高效率，我将为您创建一个学习任务"。',
+      '只输出JSON：{"reply":"给用户的回复","actions":[{"type":"工具名","...对应参数"}]}'
+    ].join('\n');
+    const hist = Store.state.chat.slice(-10)
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => ({ role: m.role, content: m.content }));
+    while (hist.length && hist[hist.length - 1].role === 'user' && hist[hist.length - 1].content === userText) hist.pop();
+    const msgs = [{ role: 'system', content: sys + '\n当前学生数据：' + ctxSummary() }]
+      .concat(hist, [{ role: 'user', content: userText }]);
+    const txt = await chat(msgs, { temperature: 0.4, maxTokens: 1300 });
+    try {
+      const obj = extractJSON(txt);
+      return {
+        reply: obj.reply || String(txt),
+        actions: Array.isArray(obj.actions) ? obj.actions.filter(a => a && typeof a.type === 'string') : []
+      };
+    } catch (e) {
+      return { reply: String(txt), actions: [] };
+    }
+  }
+
   async function test() {
     await chat([{ role: 'user', content: '回复OK' }], { maxTokens: 10 });
   }
 
-  return { PRESETS, ready, chat, genPlan, analyzeMistake, predictRisk, weeklyReport, ask, assess, genKnowledgeMap, parsePlanText, genGrowthPath, test };
+  return { PRESETS, ready, chat, genPlan, analyzeMistake, predictRisk, weeklyReport, ask, assess, genKnowledgeMap, parsePlanText, genGrowthPath, genQuestions, findKp, agentAct, test };
 })();

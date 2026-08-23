@@ -1,4 +1,5 @@
 const Profiler = (() => {
+  const DAY_MS = 86400000;
   const clamp = v => Math.max(0, Math.min(100, Math.round(v)));
   const pad = n => String(n).padStart(2, '0');
   const dstr = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());

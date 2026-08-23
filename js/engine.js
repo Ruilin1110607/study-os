@@ -42,6 +42,19 @@ const Engine = (() => {
     return p.mastery - prev;
   }
 
+  function practiceResult(kpId, isCorrect) {
+    const p = kp(kpId);
+    if (!p) return 0;
+    const prev = p.mastery;
+    p.mastery = Math.max(0, Math.min(100, p.mastery + (isCorrect ? 2 : -5)));
+    if (isCorrect && !p.nextReview && p.mastery >= 60) {
+      p.stage = Math.max(p.stage, 1);
+      p.nextReview = addDays(today(), INTERVALS[p.stage]);
+    }
+    Store.logEvent('practice', kpId, { isCorrect, delta: p.mastery - prev });
+    return p.mastery - prev;
+  }
+
   function addMistake(kpId, tag, desc, analysis) {
     S().mistakes.push({
       id: Store.uid(), kpId, tag: tag || '其他', desc: desc || '',
@@ -89,38 +102,23 @@ const Engine = (() => {
     const budget = st.profile.dailyMinutes || 120;
     const items = [];
     let used = 0;
-    dueKps()
-      .sort((a, b) => weakness(b) - weakness(a))
-      .forEach(p => {
-        if (used >= budget * 0.6) return;
-        items.push({
-          id: Store.uid(), kpId: p.id,
-          title: courseName(p.courseId) + ' · ' + p.name,
-          minutes: 15, tag: '到期复习',
-          reason: '掌握度 ' + p.mastery + '%，' + (overdueDays(p) > 0 ? '已逾期 ' + overdueDays(p) + ' 天' : '今日到期'),
-          done: false, source: 'rule'
-        });
-        used += 15;
+    const ranked = (typeof Intel !== 'undefined') ? Intel.missions(12) : [];
+    ranked.forEach(({ p, m }) => {
+      if (used >= budget) return;
+      const min = Math.max(10, Math.min(m.recMin, budget - used));
+      items.push({
+        id: Store.uid(), kpId: p.id,
+        title: courseName(p.courseId) + ' · ' + p.name,
+        minutes: min,
+        tag: m.kind === '复习' ? '到期复习' : '薄弱推进',
+        reason: '优先级 ' + m.score + '：' + m.reasons.join('、'),
+        done: false, source: 'rule'
       });
-    st.kps
-      .filter(p => !items.some(i => i.kpId === p.id))
-      .sort((a, b) => weakness(b) - weakness(a))
-      .slice(0, 8)
-      .forEach(p => {
-        if (used >= budget) return;
-        items.push({
-          id: Store.uid(), kpId: p.id,
-          title: courseName(p.courseId) + ' · ' + p.name,
-          minutes: Math.min(30, budget - used),
-          tag: '薄弱推进',
-          reason: weakReason(p),
-          done: false, source: 'rule'
-        });
-        used += Math.min(30, budget - used);
-      });
+      used += min;
+    });
     st.planItems = items;
     st.planDate = today();
-    st.planNote = '按「间隔复习 + 薄弱加权」规则自动生成（未接入 AI）。在设置中配置 API Key 后可体验 AI 规划。';
+    st.planNote = '由 Learning Intelligence 生成：按 掌握度 × 遗忘风险 × 考试紧迫 × 重要度 综合排序。配置 AI 后可获得更个性化的规划。';
     st.planGenTs = Date.now();
     Store.logEvent('plan_generate', '', { source: 'rule', count: items.length });
   }
@@ -186,7 +184,7 @@ const Engine = (() => {
   return {
     INTERVALS, today, addDays, diffDays, dstr, weekday, fmtCN,
     course, kp, courseName,
-    checkin, addMistake,
+    checkin, addMistake, practiceResult,
     dueKps, overdueDays, weakness, weakReason,
     buildRulePlan, applyPlan, stats
   };

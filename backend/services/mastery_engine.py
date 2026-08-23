@@ -1,0 +1,27 @@
+"""掌握度引擎 —— 与前端 engine.js 的间隔复习规则保持一致（单一权威实现将逐步迁到这里）。"""
+
+from .common import INTERVALS, add_days
+
+
+def apply_checkin(p, rating: str, today: str) -> int:
+    """对知识点应用一次打卡，返回掌握度变化量。p 为 KnowledgePoint ORM 对象。"""
+    prev = p.mastery
+    if rating == "good":
+        p.mastery = min(100, p.mastery + 10)
+        p.stage = min(len(INTERVALS) - 1, (p.stage or 0) + 1)
+        p.next_review = add_days(today, INTERVALS[p.stage])
+    elif rating == "ok":
+        p.mastery = min(100, p.mastery + 4)
+        p.next_review = add_days(today, max(1, round(INTERVALS[p.stage or 0] * 0.6)))
+    else:
+        p.mastery = max(0, p.mastery - 12)
+        p.stage = 0
+        p.next_review = add_days(today, 1)
+    return p.mastery - prev
+
+
+def apply_practice(p, is_correct: bool) -> int:
+    """练习对掌握度的微调：答对 +2，答错 -5。"""
+    prev = p.mastery
+    p.mastery = max(0, min(100, p.mastery + (2 if is_correct else -5)))
+    return p.mastery - prev
