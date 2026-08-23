@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>学习OS · AI 学习决策系统</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="logo">学习<span>OS</span><small>AI 学习决策系统</small></div>
+    <nav id="nav">
+      <button data-act="nav" data-view="today">今日计划</button>
+      <button data-act="nav" data-view="tools">工具箱</button>
+      <button data-act="nav" data-view="tree">知识树</button>
+      <button data-act="nav" data-view="practice">练习室</button>
+      <button data-act="nav" data-view="mistakes">错题本</button>
+      <button data-act="nav" data-view="data">学习数据</button>
+      <button data-act="nav" data-view="growth">成长</button>
+      <button data-act="nav" data-view="settings">设置</button>
+    </nav>
+    <div class="side-foot">
+      <span id="api-dot" class="dot"></span><span id="api-label">AI 未配置</span>
+      <button class="txt-btn" data-act="about-open" style="margin-left:auto">关于</button>
+    </div>
+  </aside>
+  <main id="main"></main>
+</div>
+
+<button class="fab" data-act="chat-open" title="Study Agent">Agent</button>
+
+<div id="drawer" class="drawer">
+  <div class="drawer-head">
+    <b>Study Agent</b><span id="agent-status" class="muted sm"></span>
+    <span class="grow"></span>
+    <button class="txt-btn" data-act="chat-clear">清空</button>
+    <button class="icon-btn" data-act="chat-close" title="关闭">×</button>
+  </div>
+  <div id="chat-msgs" class="chat-msgs"></div>
+  <div class="chips-row" id="chat-chips"></div>
+  <form id="chat-form">
+    <textarea id="chat-input" rows="2" placeholder="问我任何学习问题，例如：我只有1小时，帮我重排今天…"></textarea>
+    <button class="btn primary sm" type="submit">发送</button>
+  </form>
+</div>
+
+<div id="modal-root"></div>
+<div id="toast-root"></div>
+
+<script src="js/store.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/profiler.js"></script>
+<script src="js/intel.js"></script>
+<script src="js/assessor.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
