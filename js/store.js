@@ -8,7 +8,7 @@ const Store = (() => {
     return {
       schemaVersion: 2,
       profile: { name: '', goal: '', major: '', dailyMinutes: 180, semesterStart: '' },
-      api: { preset: 'deepseek', base: 'https://api.deepseek.com/v1', key: '', model: 'deepseek-chat' },
+      api: { preset: 'pollinations', base: 'https://text.pollinations.ai', key: '', model: 'openai' },
       courses: [],
       kps: [],
       logs: [],
@@ -40,6 +40,10 @@ const Store = (() => {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (!parsed.schemaVersion || parsed.schemaVersion < 2) backfillV2(parsed);
+        if (!parsed.api || (!parsed.api.key && parsed.api.preset === 'deepseek')) {
+          parsed.api = Object.assign(blank().api, parsed.api || {},
+            { preset: 'pollinations', base: 'https://text.pollinations.ai', key: '', model: 'openai' });
+        }
         return Object.assign(blank(), parsed);
       }
     } catch (e) {}

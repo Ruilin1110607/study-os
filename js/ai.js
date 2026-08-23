@@ -1,5 +1,6 @@
 const AI = (() => {
   const PRESETS = {
+    pollinations: { label: '免费体验（无需 Key，公共接口较慢）', base: 'https://text.pollinations.ai', endpoint: 'https://text.pollinations.ai/openai', model: 'openai', noKey: true },
     deepseek: { label: 'DeepSeek（推荐，便宜）', base: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
     zhipu: { label: '智谱 GLM（有免费额度）', base: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
     kimi: { label: 'Moonshot Kimi', base: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
@@ -8,7 +9,12 @@ const AI = (() => {
   };
 
   const cfg = () => Store.state.api;
-  const ready = () => !!(cfg().key && cfg().base && cfg().model);
+  const ready = () => {
+    const c = cfg();
+    const p = PRESETS[c.preset];
+    const needKey = !(p && p.noKey);
+    return !!(c.base && c.model && (!needKey || c.key));
+  };
 
   async function chat(messages, opt) {
     opt = opt || {};
@@ -21,12 +27,15 @@ const AI = (() => {
     };
     if (opt.json) body.response_format = { type: 'json_object' };
     if (opt.maxTokens) body.max_tokens = opt.maxTokens;
-    const url = c.base.replace(/\/+$/, '') + '/chat/completions';
+    const pr = PRESETS[c.preset];
+    const url = (pr && pr.endpoint) || c.base.replace(/\/+$/, '') + '/chat/completions';
 
     async function doFetch(b) {
+      const headers = { 'Content-Type': 'application/json' };
+      if (c.key) headers.Authorization = 'Bearer ' + c.key;
       const res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + c.key },
+        headers,
         body: JSON.stringify(b)
       });
       if (!res.ok) {

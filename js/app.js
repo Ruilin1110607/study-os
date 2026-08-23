@@ -479,7 +479,7 @@ const App = (() => {
           <button class="btn primary sm" type="submit">保存配置</button>
           <button class="btn ghost sm" type="button" data-act="api-test">测试连接</button>
         </div>
-        <div class="sub" style="margin-top:10px">Key 只存在本机浏览器 localStorage，请求由浏览器直连服务商，不经过任何第三方服务器。推荐 DeepSeek（注册即送额度）。若报网络/CORS 错误请更换服务商。</div>
+        <div class="sub" style="margin-top:10px">默认「免费体验」走公共接口，无需 Key 即可用，但速度较慢、高峰期可能限流；日常使用推荐注册 DeepSeek（送额度）填入 Key。Key 只存本机浏览器，请求直连服务商，不经第三方。</div>
       </form>
     </div>
 
@@ -992,7 +992,10 @@ const App = (() => {
     $$('#nav button').forEach(b => b.classList.toggle('active', b.dataset.view === view));
     const dot = $('#api-dot'), lab = $('#api-label');
     dot.classList.toggle('on', AI.ready());
-    lab.textContent = AI.ready() ? 'AI 已连接 · ' + Store.state.api.model : 'AI 未配置';
+    const ap = Store.state.api;
+    lab.textContent = !AI.ready() ? 'AI 未配置'
+      : (ap.preset === 'pollinations' && !ap.key) ? 'AI 免费体验中'
+      : 'AI 已连接 · ' + ap.model;
     $('#main').innerHTML = (VIEWS[view] || vToday)();
     renderChat();
   }
