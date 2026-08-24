@@ -135,7 +135,12 @@
   async function detectTransport() {
     try {
       const r = await fetch(apiBase + '/api/health', { method: 'GET' });
-      transport = r.ok ? 'api' : 'local';
+      if (!r.ok) { transport = 'local'; return transport; }
+      // 静态托管（如 Cloudflare Pages）会对未知路径回退 index.html 且返回 200，
+      // 必须校验响应体确实是本服务健康数据，否则误判为云模式
+      let j = null;
+      try { j = await r.json(); } catch (e) { j = null; }
+      transport = (j && j.ok === true && j.service === 'studyos') ? 'api' : 'local';
     } catch (e) { transport = 'local'; }
     return transport;
   }
