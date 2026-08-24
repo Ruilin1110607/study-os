@@ -69,7 +69,13 @@ const AI = (() => {
         throw err;
       }
       const data = await res.json();
-      return (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+      const msg = (data.choices && data.choices[0] && data.choices[0].message) || {};
+      const content = msg.content || '';
+      if (!content) {
+        if (msg.reasoning_content) throw new Error('该模型是推理模型，思考耗尽了输出上限且未产出正文。建议在设置中换用非推理模型（如 glm-4-flash）后重试');
+        throw new Error('服务商返回了空内容');
+      }
+      return content;
     }
 
     try {
@@ -149,7 +155,7 @@ const AI = (() => {
       + '\n请生成今天的计划。';
     const txt = await chat(
       [{ role: 'system', content: sys }, { role: 'user', content: user }],
-      { json: true, maxTokens: 1600 }
+      { json: true, maxTokens: 3200 }
     );
     const obj = extractJSON(txt);
     const raw = Array.isArray(obj) ? obj : (obj.items || []);
@@ -179,7 +185,7 @@ const AI = (() => {
       + '\n错题描述：' + (m.desc || '无');
     const txt = await chat(
       [{ role: 'system', content: sys }, { role: 'user', content: user }],
-      { json: true, maxTokens: 900 }
+      { json: true, maxTokens: 4200 }
     );
     return extractJSON(txt);
   }
@@ -195,7 +201,7 @@ const AI = (() => {
     const user = '今天：' + Engine.today() + '\n学生数据：' + ctxSummary();
     const txt = await chat(
       [{ role: 'system', content: sys }, { role: 'user', content: user }],
-      { json: true, maxTokens: 1400 }
+      { json: true, maxTokens: 3000 }
     );
     const obj = extractJSON(txt);
     return obj.risks || [];
@@ -210,7 +216,7 @@ const AI = (() => {
     const user = '今天：' + Engine.today() + '\n学生数据：' + ctxSummary();
     return await chat(
       [{ role: 'system', content: sys }, { role: 'user', content: user }],
-      { temperature: 0.5, maxTokens: 1400 }
+      { temperature: 0.5, maxTokens: 3000 }
     );
   }
 
@@ -225,7 +231,7 @@ const AI = (() => {
     while (hist.length && hist[hist.length - 1].role === 'user' && hist[hist.length - 1].content === q) hist.pop();
     const msgs = [{ role: 'system', content: sys + '\n当前学生数据：' + ctxSummary() }]
       .concat(hist, [{ role: 'user', content: q }]);
-    return await chat(msgs, { temperature: 0.6, maxTokens: 900 });
+    return await chat(msgs, { temperature: 0.6, maxTokens: 4200 });
   }
 
   async function assess(digestJSON) {
@@ -239,7 +245,7 @@ const AI = (() => {
     ].join('\n');
     const txt = await chat(
       [{ role: 'system', content: sys }, { role: 'user', content: '体检数据：' + digestJSON }],
-      { json: true, temperature: 0.4, maxTokens: 1200 }
+      { json: true, temperature: 0.4, maxTokens: 2600 }
     );
     return extractJSON(txt);
   }
@@ -254,7 +260,7 @@ const AI = (() => {
     const user = `专业：${major}；年级：${grade || '大一'}。请生成知识地图。`;
     const txt = await chat(
       [{ role: 'system', content: sys }, { role: 'user', content: user }],
-      { json: true, maxTokens: 2200 }
+      { json: true, maxTokens: 4200 }
     );
     return extractJSON(txt);
   }
@@ -268,7 +274,7 @@ const AI = (() => {
     const user = `方案文本（可能截断）：\n${String(text).slice(0, 6000)}\n\n${majorLabel ? '标注专业：' + majorLabel : ''}\n请解析。`;
     const txt = await chat(
       [{ role: 'system', content: sys }, { role: 'user', content: user }],
-      { json: true, maxTokens: 2400 }
+      { json: true, maxTokens: 4400 }
     );
     return extractJSON(txt);
   }
@@ -285,7 +291,7 @@ const AI = (() => {
     const user = `长期目标：${goal}\n时间跨度：${horizon}\n学生数据：${ctxSummary()}`;
     const txt = await chat(
       [{ role: 'system', content: sys }, { role: 'user', content: user }],
-      { json: true, temperature: 0.5, maxTokens: 2000 }
+      { json: true, temperature: 0.5, maxTokens: 4000 }
     );
     return extractJSON(txt);
   }
@@ -305,7 +311,7 @@ const AI = (() => {
     const user = `知识点：${parts.join(' / ')}\n学生当前掌握度：${p.mastery}%，历史错题 ${p.errCount} 次\n请出 ${count || 3} 道题。`;
     const txt = await chat(
       [{ role: 'system', content: sys }, { role: 'user', content: user }],
-      { json: true, temperature: 0.6, maxTokens: 1800 }
+      { json: true, temperature: 0.6, maxTokens: 3600 }
     );
     const obj = extractJSON(txt);
     const raw = Array.isArray(obj) ? obj : (obj.questions || []);
@@ -361,7 +367,7 @@ const AI = (() => {
     while (hist.length && hist[hist.length - 1].role === 'user' && hist[hist.length - 1].content === userText) hist.pop();
     const msgs = [{ role: 'system', content: sys + '\n当前学生数据：' + ctxSummary() }]
       .concat(hist, [{ role: 'user', content: userText }]);
-    const txt = await chat(msgs, { temperature: 0.4, maxTokens: 1300 });
+    const txt = await chat(msgs, { temperature: 0.4, maxTokens: 2800 });
     try {
       const obj = extractJSON(txt);
       return {
