@@ -33,6 +33,8 @@ const AI = (() => {
     const body = { model: c.model, messages, temperature };
     if (opt.json) body.response_format = { type: 'json_object' };
     if (opt.maxTokens) body.max_tokens = opt.maxTokens;
+    // 智谱 GLM-4.5/4.6 系列默认深度思考，出题等结构化任务关闭后速度提升约 3 倍
+    if (/glm-4\.[56]/i.test(c.model || '')) body.thinking = { type: 'disabled' };
     const pr = PRESETS[c.preset];
     const url = (pr && pr.endpoint) || c.base.replace(/\/+$/, '') + '/chat/completions';
 
@@ -40,7 +42,8 @@ const AI = (() => {
       const headers = { 'Content-Type': 'application/json' };
       if (c.key) headers.Authorization = 'Bearer ' + c.key;
       const ctrl = ('AbortController' in window) ? new AbortController() : null;
-      const timer = ctrl ? setTimeout(() => ctrl.abort(), opt.timeout || 45000) : null;
+      const limit = opt.timeout || 120000;
+      const timer = ctrl ? setTimeout(() => ctrl.abort(), limit) : null;
       let res;
       try {
         res = await fetch(url, {
@@ -51,7 +54,7 @@ const AI = (() => {
         });
       } catch (err) {
         if (timer) clearTimeout(timer);
-        if (ctrl && err.name === 'AbortError') throw new Error('请求超时（45 秒），请重试或换服务商');
+        if (ctrl && err.name === 'AbortError') throw new Error('请求超时（' + Math.round(limit / 1000) + ' 秒），请重试或换服务商');
         throw new Error('网络请求失败：请检查网络或该接口是否允许浏览器跨域调用');
       }
       if (timer) clearTimeout(timer);
