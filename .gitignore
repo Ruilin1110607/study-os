@@ -1,3 +1,5 @@
 __pycache__/
 backend/studyos.db
 backend/secret.key
+
+.wrangler/
