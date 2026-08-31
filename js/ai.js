@@ -9,8 +9,14 @@ const AI = (() => {
   };
 
   const cfg = () => Store.state.api;
+  // 云模式下服务端已持有可用配置（用户 Key 或环境变量 Key）时置真，见 /api/ai/status
+  let serverReady = false;
+  const setServerReady = v => { serverReady = !!v; };
   const ready = () => {
     const c = cfg();
+    if (typeof Store !== 'undefined' && Store.transport === 'api') {
+      return serverReady || !!(c.base && c.model);
+    }
     return !!(c.base && c.model && c.key);
   };
 
@@ -389,5 +395,5 @@ const AI = (() => {
     await chat([{ role: 'user', content: '回复OK' }], { maxTokens: 10 });
   }
 
-  return { PRESETS, ready, chat, genPlan, analyzeMistake, predictRisk, weeklyReport, ask, assess, genKnowledgeMap, parsePlanText, genGrowthPath, genQuestions, findKp, agentAct, test };
+  return { PRESETS, ready, setServerReady, chat, genPlan, analyzeMistake, predictRisk, weeklyReport, ask, assess, genKnowledgeMap, parsePlanText, genGrowthPath, genQuestions, findKp, agentAct, test };
 })();

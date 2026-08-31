@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -11,11 +12,16 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 app = FastAPI(title="StudyOS API", version="3.0")
 
+# 同源部署（默认，前端由本服务托管）不需要 CORS；
+# 前后端分离自托管时用环境变量配置白名单，如 STUDYOS_CORS_ORIGINS=https://a.example,https://b.example
+CORS_ORIGINS = [o.strip() for o in os.environ.get("STUDYOS_CORS_ORIGINS", "").split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=CORS_ORIGINS,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+    allow_credentials=False,
 )
 
 

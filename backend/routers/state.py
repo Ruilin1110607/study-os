@@ -70,7 +70,8 @@ def build_state(db: Session, user: User) -> dict:
         "api": {
             "preset": user.ai_preset,
             "base": user.ai_base,
-            "key": user.ai_key,
+            # 明文 Key 不回传浏览器，只告知是否已配置；写入走 POST /api/ai/config
+            "keySet": bool(user.ai_key),
             "model": user.ai_model,
         },
         "courses": [

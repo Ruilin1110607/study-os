@@ -651,7 +651,8 @@ const App = (() => {
     const presetOpts = Object.entries(AI.PRESETS)
       .map(([k, v]) => `<option value="${k}" ${api.preset === k ? 'selected' : ''}>${v.label}</option>`).join('');
     const curPreset = AI.PRESETS[api.preset];
-    const acctCard = Store.transport === 'api' ? `
+    const cloud = Store.transport === 'api';
+    const acctCard = cloud ? `
     <div class="card">
       <div class="card-head"><h3>账户与同步</h3></div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -692,14 +693,17 @@ const App = (() => {
           <div class="field"><label>接口地址 Base URL</label><input id="f-base" value="${esc(api.base)}" placeholder="https://api.deepseek.com/v1"></div>
           <div class="field"><label>模型名称</label><input id="f-model" value="${esc(api.model)}" placeholder="deepseek-chat"></div>
         </div>
-        <div class="field"><label>API Key（仅保存在本机浏览器）</label><input id="f-key" type="password" value="${esc(api.key)}" placeholder="sk-..."></div>
+        ${cloud
+          ? `<div class="field"><label>API Key${api.keySet ? '（已保存在服务器）' : ''}</label><input id="f-key" type="password" value="" placeholder="${api.keySet ? '已配置，留空表示不修改' : 'sk-...'}"></div>`
+          : '<div class="field"><label>API Key（仅保存在本机浏览器）</label><input id="f-key" type="password" value="' + esc(api.key) + '" placeholder="sk-..."></div>'}
         ${curPreset && curPreset.keyUrl ? `<div class="sub" style="margin:-8px 0 12px"><a href="${curPreset.keyUrl}" target="_blank" rel="noopener" style="color:var(--brand)">去获取 ${esc(curPreset.label.split('（')[0])} 的 API Key ↗</a>　Gemini / 智谱均有免费额度</div>` : '<div class="sub" style="margin:-8px 0 12px">选择服务商后，这里会出现申请 Key 的直达链接</div>'}
         <div style="display:flex;gap:10px">
           <button class="btn primary sm" type="submit">保存配置</button>
           <button class="btn ghost sm" type="button" data-act="api-test">测试连接</button>
+          ${cloud && api.keySet ? '<button class="btn ghost sm" type="button" data-act="api-clear-key">清除已存 Key</button>' : ''}
         </div>
-        <div class="sub" style="margin-top:10px">Agent 需要接入一个 AI 服务才能对话与智能出题；推荐 Gemini（免费 Key）或 DeepSeek（便宜）。${Store.transport === 'api'
-          ? '当前为云同步模式：Key 保存在服务器数据库，所有 AI 请求由后端代理转发，浏览器不经手密钥。'
+        <div class="sub" style="margin-top:10px">Agent 需要接入一个 AI 服务才能对话与智能出题；推荐 Gemini（免费 Key）或 DeepSeek（便宜）。${cloud
+          ? '当前为云同步模式：Key 只保存在服务器数据库、不会回传浏览器，AI 请求由后端代理转发。'
           : '当前为本机模式：Key 只存本机浏览器，请求直连服务商。'}未接入时学习OS以本地智能引擎运行，规划、复习排期与快速自测不受影响。</div>
       </form>
     </div>
@@ -1658,7 +1662,7 @@ const App = (() => {
           <button type="button" class="btn sm ${isReg ? 'primary' : 'ghost'}" data-act="auth-tab" data-m="reg">注册新账户</button>
         </div>
         <div class="field"><label>用户名</label><input name="username" required autocomplete="username"></div>
-        <div class="field"><label>密码（至少 6 位）</label><input name="password" type="password" required minlength="6" autocomplete="${isReg ? 'new-password' : 'current-password'}"></div>
+        <div class="field"><label>密码（至少 8 位）</label><input name="password" type="password" required minlength="8" autocomplete="${isReg ? 'new-password' : 'current-password'}"></div>
         ${isReg ? '<div class="field"><label>昵称（可选）</label><input name="display_name" placeholder="怎么称呼你？"></div>' : ''}
         <div id="auth-err" class="sm" style="color:var(--red);min-height:18px;margin-bottom:6px"></div>
         <div class="sub">已检测到本地后端服务：学习数据将保存到服务器数据库，换设备登录即可继续。</div>
@@ -1946,14 +1950,28 @@ const App = (() => {
     } finally { aiBusy = false; }
   }
 
-  async function testApi() {
+  // 读取设置页表单并按模式持久化：云模式走 /api/ai/config（Key 不落浏览器、不随整包同步），本机模式存 localStorage
+  async function saveApiConfig() {
     const api = Store.state.api;
     api.base = $('#f-base').value.trim();
-    api.key = $('#f-key').value.trim();
     api.model = $('#f-model').value.trim();
-    try {
-      localStorage.setItem('study_os_v1', JSON.stringify(Store.state));
-    } catch (e) {}
+    const keyVal = $('#f-key').value.trim();
+    if (Store.transport === 'api') {
+      const body = { preset: api.preset || '', base: api.base, model: api.model };
+      if (keyVal) body.key = keyVal;
+      const r = await Store.apiFetch('/api/ai/config', { method: 'POST', body });
+      api.keySet = !!r.hasKey;
+      AI.setServerReady(r.configured);
+    } else {
+      api.key = keyVal;
+      try { localStorage.setItem('study_os_v1', JSON.stringify(Store.state)); } catch (e) {}
+    }
+    return keyVal;
+  }
+
+  async function testApi() {
+    try { await saveApiConfig(); }
+    catch (e) { toast('保存失败：' + e.message, 'error'); return; }
     toast('测试连接中…');
     try {
       await AI.test();
@@ -2005,18 +2023,18 @@ const App = (() => {
     switch (a.type) {
       case 'create_tasks': {
         const items = Array.isArray(a.items) ? a.items : [];
-        const shown = items.slice(0, 4).map(x => x.title).join('、');
+        const shown = items.slice(0, 4).map(x => esc(x.title)).join('、');
         return '创建 ' + items.length + ' 个今日任务' + (shown ? '：' + shown + (items.length > 4 ? ' 等' : '') : '');
       }
       case 'replan_today':
-        return '按你的情况重排今日计划' + (a.constraint ? '「' + a.constraint + '」' : '');
+        return '按你的情况重排今日计划' + (a.constraint ? '「' + esc(a.constraint) + '」' : '');
       case 'generate_practice': {
         const p = Engine.kp(a.kpId);
-        return '为「' + (p ? p.name : a.query || '?') + '」生成 ' + (Number(a.count) || 3) + ' 道练习题';
+        return '为「' + (p ? esc(p.name) : esc(a.query) || '?') + '」生成 ' + (Number(a.count) || 3) + ' 道练习题';
       }
       case 'add_review_tomorrow': {
         const p = Engine.kp(a.kpId);
-        return '把「' + (p ? p.name : a.query || '?') + '」加入明天复习队列';
+        return '把「' + (p ? esc(p.name) : esc(a.query) || '?') + '」加入明天复习队列';
       }
       case 'plan_days': {
         const days = Array.isArray(a.days) ? a.days : [];
@@ -2244,6 +2262,15 @@ const App = (() => {
         render();
         break;
       case 'api-test': await testApi(); break;
+      case 'api-clear-key':
+        try {
+          const r = await Store.apiFetch('/api/ai/config', { method: 'POST', body: { clear_key: true } });
+          Store.state.api.keySet = !!r.hasKey;
+          AI.setServerReady(r.configured);
+          render();
+          toast('已清除服务器保存的 Key', 'success');
+        } catch (e) { toast('清除失败：' + e.message, 'error'); }
+        break;
       case 'notif-open': openNotif(); break;
       case 'about-open': openAbout(); break;
       case 'mark-read':
@@ -2433,13 +2460,13 @@ const App = (() => {
         toast('资料已保存', 'success');
         break;
       case 'f-api':
-        Object.assign(Store.state.api, {
-          base: $('#f-base').value.trim(),
-          key: $('#f-key').value.trim(),
-          model: $('#f-model').value.trim()
-        });
-        Store.save();
-        toast('配置已保存，可点击「测试连接」验证', 'success');
+        try {
+          await saveApiConfig();
+          Store.save();
+          toast('配置已保存，可点击「测试连接」验证', 'success');
+        } catch (e) {
+          toast('保存失败：' + e.message, 'error');
+        }
         break;
       case 'f-replan': {
         const txt = $('#replan-text').value.trim();
@@ -2636,7 +2663,7 @@ const App = (() => {
         const password = String(d.get('password') || '');
         const errEl = $('#auth-err');
         if (!username) { errEl.textContent = '请填写用户名'; return; }
-        if (password.length < 6) { errEl.textContent = '密码至少 6 位'; return; }
+        if (password.length < 8) { errEl.textContent = '密码至少 8 位'; return; }
         const body = mode === 'register'
           ? { username, password, display_name: String(d.get('display_name') || '').trim() }
           : { username, password };
@@ -2646,6 +2673,10 @@ const App = (() => {
           Store.Auth.set(r.token);
           const snap = await Store.apiFetch('/api/state');
           Store.hydrate(snap);
+          try {
+            const st = await Store.apiFetch('/api/ai/status');
+            AI.setServerReady(st.configured);
+          } catch (e) {}
           closeModal();
           afterBoot();
           toast(`欢迎，${r.display_name || r.username}`, 'success');
@@ -2684,6 +2715,10 @@ const App = (() => {
         }
         toast('云端同步失败，本次以本机数据运行', 'error');
       }
+      try {
+        const st = await Store.apiFetch('/api/ai/status');
+        AI.setServerReady(st.configured);
+      } catch (e) {}
     }
     afterBoot();
   }

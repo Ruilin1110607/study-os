@@ -1,9 +1,10 @@
 import secrets
 import time
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
+from .. import rate_limit
 from ..database import get_db
 from ..models import User
 from ..schemas import LoginIn, RegisterIn, TokenOut
@@ -17,12 +18,17 @@ def _new_uid() -> str:
 
 
 @router.post("/register", response_model=TokenOut)
-def register(body: RegisterIn, db: Session = Depends(get_db)):
+def register(body: RegisterIn, request: Request, db: Session = Depends(get_db)):
+    ip = rate_limit.client_ip(request)
+    rl_key = f"register:{ip}"
+    if not rate_limit.allowed(rl_key):
+        raise HTTPException(status_code=429, detail="注册尝试过于频繁，请 5 分钟后再试")
     username = body.username.strip().lower()
     if not username:
         raise HTTPException(status_code=400, detail="用户名不能为空")
     exists = db.query(User).filter(User.username == username).first()
     if exists:
+        rate_limit.record(rl_key)
         raise HTTPException(status_code=409, detail="用户名已被占用")
     user = User(
         id=_new_uid(),
@@ -33,14 +39,21 @@ def register(body: RegisterIn, db: Session = Depends(get_db)):
     )
     db.add(user)
     db.commit()
+    rate_limit.reset(rl_key)
     return TokenOut(token=create_token(user.id), username=user.username, display_name=user.display_name)
 
 
 @router.post("/login", response_model=TokenOut)
-def login(body: LoginIn, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.username == body.username.strip().lower()).first()
+def login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
+    username = body.username.strip().lower()
+    rl_key = f"login:{rate_limit.client_ip(request)}:{username}"
+    if not rate_limit.allowed(rl_key):
+        raise HTTPException(status_code=429, detail="尝试过于频繁，请 5 分钟后再试")
+    user = db.query(User).filter(User.username == username).first()
     if not user or not verify_password(body.password, user.password_hash):
+        rate_limit.record(rl_key)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
+    rate_limit.reset(rl_key)
     return TokenOut(token=create_token(user.id), username=user.username, display_name=user.display_name)
 
 

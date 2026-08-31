@@ -3,3 +3,4 @@ backend/studyos.db
 backend/secret.key
 
 .wrangler/
+.zcode/
