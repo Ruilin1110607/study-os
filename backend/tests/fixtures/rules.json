@@ -1,0 +1,44 @@
+{
+  "_comment": "前后端共享规则用例：pytest 与 node --test 跑同一份数据，锁定 js/engine.js+js/intel.js 与 backend/services/* 的行为一致。字段名用前端 camelCase，后端测试自行适配 snake_case。",
+  "checkin": [
+    { "name": "good 推进到下一阶段", "kp": { "mastery": 43, "stage": 1, "nextReview": null }, "rating": "good", "today": "2026-08-31",
+      "expect": { "mastery": 53, "stage": 2, "nextReview": "2026-09-04", "delta": 10 } },
+    { "name": "good 封顶 100 且 stage 不越界", "kp": { "mastery": 97, "stage": 4, "nextReview": null }, "rating": "good", "today": "2026-08-31",
+      "expect": { "mastery": 100, "stage": 4, "nextReview": "2026-09-15", "delta": 3 } },
+    { "name": "ok 按 0.6 倍间隔", "kp": { "mastery": 50, "stage": 2, "nextReview": null }, "rating": "ok", "today": "2026-08-31",
+      "expect": { "mastery": 54, "stage": 2, "nextReview": "2026-09-02", "delta": 4 } },
+    { "name": "ok 在 stage0 至少隔 1 天", "kp": { "mastery": 30, "stage": 0, "nextReview": null }, "rating": "ok", "today": "2026-08-31",
+      "expect": { "mastery": 34, "stage": 0, "nextReview": "2026-09-01", "delta": 4 } },
+    { "name": "bad 重置 stage 并明天复习", "kp": { "mastery": 50, "stage": 3, "nextReview": null }, "rating": "bad", "today": "2026-08-31",
+      "expect": { "mastery": 38, "stage": 0, "nextReview": "2026-09-01", "delta": -12 } },
+    { "name": "bad 不低于 0", "kp": { "mastery": 5, "stage": 0, "nextReview": null }, "rating": "bad", "today": "2026-08-31",
+      "expect": { "mastery": 0, "stage": 0, "nextReview": "2026-09-01", "delta": -5 } }
+  ],
+  "practice": [
+    { "name": "答对 +2 且保留既有排期", "kp": { "mastery": 50, "stage": 1, "nextReview": "2026-09-02" }, "isCorrect": true, "today": "2026-08-31",
+      "expect": { "mastery": 52, "stage": 1, "nextReview": "2026-09-02", "delta": 2 } },
+    { "name": "答对且无排期且掌握度≥60 自动进入复习循环", "kp": { "mastery": 59, "stage": 0, "nextReview": null }, "isCorrect": true, "today": "2026-08-31",
+      "expect": { "mastery": 61, "stage": 1, "nextReview": "2026-09-02", "delta": 2 } },
+    { "name": "答对但掌握度<60 不排期", "kp": { "mastery": 50, "stage": 0, "nextReview": null }, "isCorrect": true, "today": "2026-08-31",
+      "expect": { "mastery": 52, "stage": 0, "nextReview": null, "delta": 2 } },
+    { "name": "答错 -5 不低于 0", "kp": { "mastery": 3, "stage": 1, "nextReview": null }, "isCorrect": false, "today": "2026-08-31",
+      "expect": { "mastery": 0, "stage": 1, "nextReview": null, "delta": -3 } }
+  ],
+  "forgetting": [
+    { "name": "长期未学+低掌握 风险封顶", "kp": { "mastery": 30, "errCount": 2, "lastStudy": "2026-07-01", "createdAt": "2026-06-01" }, "accuracy": null, "today": "2026-08-31",
+      "expect": { "risk": 100, "level": "high" } },
+    { "name": "最近学过+高掌握 低风险", "kp": { "mastery": 90, "errCount": 0, "lastStudy": "2026-08-29", "createdAt": "2026-08-01" }, "accuracy": 90, "today": "2026-08-31",
+      "expect": { "risk": 24, "level": "low" } },
+    { "name": "边界 65 落在 mid", "kp": { "mastery": 85, "errCount": 0, "lastStudy": "2026-08-25", "createdAt": "2026-08-01" }, "accuracy": 80, "today": "2026-08-31",
+      "expect": { "risk": 65, "level": "mid" } }
+  ],
+  "mission": [
+    { "name": "薄弱+考试临近+核心知识点", "kp": { "mastery": 30, "errCount": 2, "importance": 5 }, "risk": 70,
+      "course": { "name": "高等数学", "examDate": "2026-09-10" }, "today": "2026-08-31",
+      "expect": { "score": 71, "urgency": 80, "recMin": 35, "kind": "复习", "level": "high",
+                  "reasons": ["掌握度低（30%）", "遗忘风险高", "累计错题 2 次", "高等数学 考试临近", "核心知识点"] } },
+    { "name": "健康知识点走巩固保持（锁定 half-up 舍入：10.5 → 11）", "kp": { "mastery": 85, "errCount": 0, "importance": null }, "risk": 24,
+      "course": null, "today": "2026-08-31",
+      "expect": { "score": 18, "urgency": 10, "recMin": 15, "kind": "学习", "level": "low", "reasons": ["巩固保持"] } }
+  ]
+}

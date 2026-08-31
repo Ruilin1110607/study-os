@@ -1,0 +1,8 @@
+{
+  "name": "studyos",
+  "private": true,
+  "description": "StudyOS 前端测试脚本（零依赖，node --test）",
+  "scripts": {
+    "test": "node --test tests/js/"
+  }
+}

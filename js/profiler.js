@@ -105,3 +105,5 @@ const Profiler = (() => {
 
   return { compute, forAI, snapshot, latest };
 })();
+
+if (typeof module !== 'undefined' && module.exports) module.exports = Profiler;

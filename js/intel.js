@@ -25,10 +25,10 @@ const Intel = (() => {
     return clamp(score);
   }
 
-  function forgettingRisk(p) {
+  // ---- 纯规则函数：不触碰 Store 与真实时钟，与后端 forgetting_engine/priority_engine 共享 fixture 锁定 ----
+  function forgettingRiskRules(p, acc, todayStr) {
     const base = p.lastStudy || p.createdAt;
-    const days = base ? Math.max(0, Engine.diffDays(base, Engine.today())) : 30;
-    const acc = accuracy(p);
+    const days = base ? Math.max(0, Engine.diffDays(base, todayStr)) : 30;
     const r = Math.min(100, days * 9)
       + (100 - p.mastery) * 0.25
       + (acc == null ? 10 : (100 - acc) * 0.35)
@@ -36,15 +36,17 @@ const Intel = (() => {
     return clamp(r);
   }
 
+  function forgettingRisk(p) {
+    return forgettingRiskRules(p, accuracy(p), Engine.today());
+  }
+
   function riskLevel(r) { return r >= 66 ? 'high' : r >= 33 ? 'mid' : 'low'; }
 
-  function mission(p) {
-    const fr = forgettingRisk(p);
+  function missionRules(p, fr, course, todayStr) {
     const imp = p.importance == null ? 3 : p.importance;
-    const c = Engine.course(p.courseId);
     let urgency = 10;
-    if (c && c.examDate) {
-      const dd = Engine.diffDays(Engine.today(), c.examDate);
+    if (course && course.examDate) {
+      const dd = Engine.diffDays(todayStr, course.examDate);
       if (dd >= 0 && dd <= 45) urgency = clamp(100 - dd * 2);
     }
     const weakness = clamp((100 - p.mastery) * 0.7 + (p.errCount || 0) * 6);
@@ -56,12 +58,16 @@ const Intel = (() => {
     if (fr >= 66) reasons.push('遗忘风险高');
     else if (fr >= 33) reasons.push('开始遗忘');
     if ((p.errCount || 0) > 0) reasons.push('累计错题 ' + p.errCount + ' 次');
-    if (urgency > 60 && c) reasons.push(c.name + ' 考试临近');
+    if (urgency > 60 && course) reasons.push(course.name + ' 考试临近');
     if (imp >= 4) reasons.push('核心知识点');
     if (!reasons.length) reasons.push('巩固保持');
     const recMin = p.mastery < 40 ? 35 : p.mastery < 70 ? 25 : 15;
     const kind = fr >= 66 ? '复习' : '学习';
     return { score, reasons, recMin, kind, risk: fr, level: riskLevel(fr), urgency };
+  }
+
+  function mission(p) {
+    return missionRules(p, forgettingRisk(p), Engine.course(p.courseId), Engine.today());
   }
 
   function missions(n) {
@@ -134,5 +140,7 @@ const Intel = (() => {
     return { total, dist, weak };
   }
 
-  return { accuracy, confidence, forgettingRisk, riskLevel, mission, missions, insights, errorIntel };
+  return { accuracy, confidence, forgettingRiskRules, forgettingRisk, riskLevel, missionRules, mission, missions, insights, errorIntel };
 })();
+
+if (typeof module !== 'undefined' && module.exports) module.exports = Intel;

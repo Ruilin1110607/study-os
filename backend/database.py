@@ -1,10 +1,12 @@
+import os
 from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 BACKEND_DIR = Path(__file__).resolve().parent
-DB_PATH = BACKEND_DIR / "studyos.db"
+# STUDYOS_DB：测试隔离与自托管自定义数据文件位置
+DB_PATH = Path(os.environ.get("STUDYOS_DB") or (BACKEND_DIR / "studyos.db"))
 
 engine = create_engine(
     f"sqlite:///{DB_PATH}",

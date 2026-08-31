@@ -20,39 +20,50 @@ const Engine = (() => {
   const kp = id => S().kps.find(k => k.id === id);
   const courseName = id => { const c = course(id); return c ? c.name : ''; };
 
-  function checkin(kpId, rating, minutes) {
-    const p = kp(kpId);
-    if (!p) return 0;
+  // ---- 纯规则函数：不触碰 Store 与真实时钟，供 node 测试与后端共享 fixture（rules.json）锁定行为 ----
+  function checkinRules(p, rating, todayStr) {
     const prev = p.mastery;
-    p.lastStudy = today();
     if (rating === 'good') {
       p.mastery = Math.min(100, p.mastery + 10);
-      p.stage = Math.min(INTERVALS.length - 1, p.stage + 1);
-      p.nextReview = addDays(today(), INTERVALS[p.stage]);
+      p.stage = Math.min(INTERVALS.length - 1, (p.stage || 0) + 1);
+      p.nextReview = addDays(todayStr, INTERVALS[p.stage]);
     } else if (rating === 'ok') {
       p.mastery = Math.min(100, p.mastery + 4);
-      p.nextReview = addDays(today(), Math.max(1, Math.round(INTERVALS[p.stage] * 0.6)));
+      p.nextReview = addDays(todayStr, Math.max(1, Math.round(INTERVALS[p.stage || 0] * 0.6)));
     } else {
       p.mastery = Math.max(0, p.mastery - 12);
       p.stage = 0;
-      p.nextReview = addDays(today(), 1);
+      p.nextReview = addDays(todayStr, 1);
     }
-    S().logs.push({ id: Store.uid(), date: today(), ts: Date.now(), kpId, rating, minutes: minutes || 0 });
-    Store.logEvent('checkin', kpId, { rating, minutes: minutes || 0, delta: p.mastery - prev });
     return p.mastery - prev;
+  }
+
+  function practiceRules(p, isCorrect, todayStr) {
+    const prev = p.mastery;
+    p.mastery = Math.max(0, Math.min(100, p.mastery + (isCorrect ? 2 : -5)));
+    if (isCorrect && !p.nextReview && p.mastery >= 60) {
+      p.stage = Math.max(p.stage || 0, 1);
+      p.nextReview = addDays(todayStr, INTERVALS[p.stage]);
+    }
+    return p.mastery - prev;
+  }
+
+  function checkin(kpId, rating, minutes) {
+    const p = kp(kpId);
+    if (!p) return 0;
+    p.lastStudy = today();
+    const delta = checkinRules(p, rating, today());
+    S().logs.push({ id: Store.uid(), date: today(), ts: Date.now(), kpId, rating, minutes: minutes || 0 });
+    Store.logEvent('checkin', kpId, { rating, minutes: minutes || 0, delta });
+    return delta;
   }
 
   function practiceResult(kpId, isCorrect) {
     const p = kp(kpId);
     if (!p) return 0;
-    const prev = p.mastery;
-    p.mastery = Math.max(0, Math.min(100, p.mastery + (isCorrect ? 2 : -5)));
-    if (isCorrect && !p.nextReview && p.mastery >= 60) {
-      p.stage = Math.max(p.stage, 1);
-      p.nextReview = addDays(today(), INTERVALS[p.stage]);
-    }
-    Store.logEvent('practice', kpId, { isCorrect, delta: p.mastery - prev });
-    return p.mastery - prev;
+    const delta = practiceRules(p, isCorrect, today());
+    Store.logEvent('practice', kpId, { isCorrect, delta });
+    return delta;
   }
 
   function addMistake(kpId, tag, desc, analysis) {
@@ -184,8 +195,10 @@ const Engine = (() => {
   return {
     INTERVALS, today, addDays, diffDays, dstr, weekday, fmtCN,
     course, kp, courseName,
-    checkin, addMistake, practiceResult,
+    checkinRules, practiceRules, checkin, addMistake, practiceResult,
     dueKps, overdueDays, weakness, weakReason,
     buildRulePlan, applyPlan, stats
   };
 })();
+
+if (typeof module !== 'undefined' && module.exports) module.exports = Engine;
