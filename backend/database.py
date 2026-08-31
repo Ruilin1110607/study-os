@@ -10,7 +10,12 @@ DB_PATH = Path(os.environ.get("STUDYOS_DB") or (BACKEND_DIR / "studyos.db"))
 
 engine = create_engine(
     f"sqlite:///{DB_PATH}",
-    connect_args={"check_same_thread": False},
+    connect_args={
+        "check_same_thread": False,
+        "isolation_level": "DEFERRED",
+        "timeout": 30,
+        "journal_mode": "WAL"
+    },
 )
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)

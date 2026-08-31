@@ -50,8 +50,42 @@ const App = (() => {
     if (isEmptyState()) Modals.openWelcome();
     else if (!Store.state.profile.name) Modals.onboard();
     render();
+    
+    // 启动同步状态指示
+    const dot = $('#api-dot'), lab = $('#api-label');
+    const updateSyncStatus = () => {
+      const retryCount = window.syncRetryCount || 0;
+      if (retryCount > 0) {
+        dot.classList.add('retrying');
+        lab.textContent = `同步失败，重试中 (${retryCount}/3)`;
+      } else if (AI.ready()) {
+        dot.classList.add('on');
+        lab.textContent = 'AI 已连接 · ' + Store.state.api.model;
+      } else {
+        dot.classList.remove('on', 'retrying');
+        lab.textContent = 'AI 未配置';
+      }
+    };
+    
+    // 初始状态
+    updateSyncStatus();
+    
+    // 监听重试状态变化
+    const originalSchedulePush = Store.schedulePush;
+    Store.schedulePush = async function(...args) {
+      const result = await originalSchedulePush.apply(this, args);
+      updateSyncStatus();
+      return result;
+    };
+    
     setTimeout(async () => {
       try {
+        // 启动定期同步（每30秒检查一次）
+        const scheduleRegularSync = () => {
+          setTimeout(scheduleRegularSync, 30000);
+          Store.schedulePush();
+        };
+        scheduleRegularSync();
         const ran = await Assessor.maybeRun(false);
         if (ran) {
           render();

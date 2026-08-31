@@ -23,6 +23,7 @@ button{font-family:inherit}
 .side-foot{margin-top:auto;display:flex;align-items:center;gap:8px;padding:0 10px;color:var(--muted);font-size:12px}
 .dot{width:9px;height:9px;border-radius:50%;background:#c6ccd9;flex-shrink:0}
 .dot.on{background:var(--green)}
+.dot.retrying{background:var(--amber);animation:pulse 1.5s infinite}
 
 main{margin-left:216px;padding:32px 38px;max-width:1060px}
 .page-head{display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px}
@@ -164,6 +165,7 @@ details.report[open] summary::after{content:"–"}
 .toast.success{background:var(--green)}
 .toast.error{background:var(--red)}
 @keyframes tIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse{0%{opacity:1}50%{opacity:.5}100%{opacity:1}}
 
 @media(max-width:900px){
 .sidebar{width:100%;position:static;flex-direction:row;align-items:center;padding:12px;gap:10px;overflow-x:auto}

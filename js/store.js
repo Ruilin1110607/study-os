@@ -314,12 +314,80 @@
     save();
   }
 
+  async function schedulePush(retryCount = 0) {
+    if (transport !== 'api') return;
+    if (!Auth.tok()) return;
+    
+    try {
+      const resp = await apiFetch('/api/state', {
+        method: 'POST',
+        body: JSON.stringify({
+          courses: state.courses,
+          kps: state.kps,
+          logs: state.logs,
+          mistakes: state.mistakes,
+          planDate: state.planDate,
+          planItems: state.planItems,
+          planNote: state.planNote,
+          planGenTs: state.planGenTs,
+          events: state.events,
+          profileSnapshots: state.profileSnapshots,
+          assessments: state.assessments,
+          knowledgeMaps: state.knowledgeMaps,
+          growthPath: state.growthPath,
+          notifyReadTs: state.notifyReadTs,
+          reports: state.reports,
+          chat: state.chat,
+          schedule: state.schedule,
+          todos: state.todos,
+          countdowns: state.countdowns,
+          pomodoroLog: state.pomodoroLog,
+          questions: state.questions,
+          attempts: state.attempts
+        })
+      });
+      
+      if (!resp.ok) {
+        throw new Error(`同步失败: ${resp.status}`);
+      }
+      
+      // 同步成功，重置重试计数
+      if (window.syncRetryCount) {
+        window.syncRetryCount = 0;
+        toast('数据已同步到云端', 'success');
+      }
+      
+    } catch (err) {
+      console.error('同步失败:', err);
+      
+      // 失败时显示错误提示
+      if (window.syncRetryCount === undefined) {
+        window.syncRetryCount = 0;
+      }
+      
+      // 指数退避重试（最多3次）
+      if (retryCount < 3) {
+        const delay = Math.pow(2, retryCount) * 1000; // 1s, 2s, 4s
+        window.syncRetryCount = retryCount + 1;
+        toast(`同步失败，${delay/1000}秒后重试...`, 'error');
+        
+        setTimeout(() => {
+          schedulePush(retryCount + 1);
+        }, delay);
+      } else {
+        // 重试3次后失败，显示最终错误
+        toast('同步失败，请检查网络连接', 'error');
+        window.syncRetryCount = 0;
+      }
+    }
+  }
+
   return {
     get state() { return state; },
     set state(v) { state = v; },
     get transport() { return transport; },
     uid, save, logEvent, seedDemo, exportData, importData, wipe,
-    Auth, apiFetch, detectTransport, hydrate,
+    Auth, apiFetch, detectTransport, hydrate, schedulePush,
     __setTransport(v) { transport = v; },
     __setApiBase(b) { apiBase = b || ''; }
   };
