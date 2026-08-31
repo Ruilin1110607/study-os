@@ -23,7 +23,7 @@ const App = (() => {
   let chatting = false;
   let quiz = null;
 
-  const TAGC = { '到期复习': 'amber', '薄弱推进': 'blue', '新学': 'green', '练习': 'purple', '休息': 'gray' };
+  const TAGC = { '到期复习': 'amber', '薄弱推进': 'blue', '新学': 'green', '练习': 'purple', '休息': 'gray', '事务': 'gray', '其他': 'gray' };
   const tagCls = t => TAGC[t] || 'gray';
   const mTag = m => m >= 80 ? 'green' : m >= 60 ? 'blue' : m >= 35 ? 'amber' : 'red';
   const stTag = s => ({ '优秀': 'green', '良好': 'blue', '一般': 'amber', '需警惕': 'red' }[s] || 'gray');
@@ -2005,7 +2005,8 @@ const App = (() => {
     switch (a.type) {
       case 'create_tasks': {
         const items = Array.isArray(a.items) ? a.items : [];
-        return '创建 ' + items.length + ' 个今日任务' + (items[0] ? '：' + items.slice(0, 3).map(x => x.title).join('、') : '');
+        const shown = items.slice(0, 4).map(x => x.title).join('、');
+        return '创建 ' + items.length + ' 个今日任务' + (shown ? '：' + shown + (items.length > 4 ? ' 等' : '') : '');
       }
       case 'replan_today':
         return '按你的情况重排今日计划' + (a.constraint ? '「' + a.constraint + '」' : '');
