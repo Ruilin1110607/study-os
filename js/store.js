@@ -1,8 +1,7 @@
 ﻿const Store = (() => {
   const KEY = 'study_os_v1';
-  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-  const pad = n => String(n).padStart(2, '0');
-  const dstr = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  const uid = () => Util.uid();
+  const dstr = d => Util.dstr(d);
 
   function blank() {
     return {
@@ -162,13 +161,16 @@
     } catch (e) {}
   }
 
+  // 试用数据的默认画像（用户已有资料时逐字段覆盖）
+  const DEMO_PROFILE = { name: '同学', goal: '通过期末', major: '', dailyMinutes: 180 };
+
   function seedDemo() {
     const off = n => Engine.addDays(Engine.today(), n);
     const prevApi = state && state.api ? state.api : null;
     const prevProfile = state && state.profile ? state.profile : null;
     const s = blank();
     if (prevApi) s.api = prevApi;
-    s.profile = { name: 'Ruilin', goal: '保研 · 高绩点', major: '数据科学', dailyMinutes: 180, semesterStart: off(-35) };
+    s.profile = { name: DEMO_PROFILE.name, goal: DEMO_PROFILE.goal, major: DEMO_PROFILE.major, dailyMinutes: DEMO_PROFILE.dailyMinutes, semesterStart: off(-35) };
     if (prevProfile) {
       ['name', 'goal', 'major', 'dailyMinutes', 'semesterStart'].forEach(k => {
         if (prevProfile[k]) s.profile[k] = prevProfile[k];

@@ -1,4 +1,9 @@
-"""知识点资源 + 服务端权威打卡接口。"""
+"""知识点资源 + 服务端权威打卡接口。规则以 js/engine.js 为权威实现，
+本文件只做 HTTP 侧落库；行为一致性由 backend/tests/fixtures/rules.json 双端锁定。"""
+
+import json
+import secrets
+import time
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -7,7 +12,7 @@ from ..database import get_db
 from ..models import Course, EventLog, KnowledgePoint, StudyLog, User
 from ..schemas import CheckinIn
 from ..security import current_user
-from ..services.common import fmt_d, parse_d, diff_days, clamp
+from ..services.common import fmt_d, parse_d, diff_days
 from ..services.forgetting_engine import forgetting_risk, level
 from ..services.priority_engine import accuracy_of, confidence_of
 
@@ -16,6 +21,10 @@ router = APIRouter(prefix="/api", tags=["knowledge"])
 
 def _today() -> str:
     return fmt_d(parse_d(None))
+
+
+def _new_id() -> str:
+    return "srv" + secrets.token_hex(6)
 
 
 @router.get("/knowledge")
@@ -65,20 +74,16 @@ def checkin(kp_id: str, body: CheckinIn, user: User = Depends(current_user), db:
     t = _today()
     delta = apply_checkin(p, body.rating, t)
     p.last_study = t
-    db.add(StudyLog(id=f"srv{secrets_ok()}", user_id=user.id, kp_id=p.id,
+    now_ms = int(time.time() * 1000)
+    db.add(StudyLog(id=_new_id(), user_id=user.id, kp_id=p.id,
                     rating=body.rating, minutes=max(0, body.minutes),
-                    date=t, ts=int(__import__("time").time() * 1000)))
-    db.add(EventLog(id=f"srv{secrets_ok()}", user_id=user.id, ts=int(__import__("time").time() * 1000),
+                    date=t, ts=now_ms))
+    db.add(EventLog(id=_new_id(), user_id=user.id, ts=now_ms,
                     date=t, type="checkin", kp_id=p.id,
-                    payload='{"rating":"%s","minutes":%d,"delta":%d}' % (body.rating, max(0, body.minutes), delta)))
+                    payload=json.dumps({"rating": body.rating, "minutes": max(0, body.minutes),
+                                        "delta": delta}, ensure_ascii=False)))
     db.commit()
     return {"delta": delta, "mastery": p.mastery, "nextReview": p.next_review}
-
-
-def secrets_ok() -> str:
-    import secrets as _s
-
-    return _s.token_hex(6)
 
 
 @router.get("/courses")

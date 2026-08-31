@@ -1,14 +1,6 @@
 const Engine = (() => {
   const INTERVALS = [1, 2, 4, 7, 15];
-  const pad = n => String(n).padStart(2, '0');
-  const dstr = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-  const today = () => dstr(new Date());
-  const addDays = (str, n) => {
-    const d = new Date(str + 'T00:00:00');
-    d.setDate(d.getDate() + n);
-    return dstr(d);
-  };
-  const diffDays = (a, b) => Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000);
+  const { today, addDays, diffDays, dstr } = Util;
   const weekday = str => ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][new Date(str + 'T00:00:00').getDay()];
   const fmtCN = str => {
     const p = str.split('-');

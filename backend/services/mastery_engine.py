@@ -1,4 +1,5 @@
-"""掌握度引擎 —— 与前端 engine.js 的间隔复习规则保持一致（单一权威实现将逐步迁到这里）。"""
+"""掌握度引擎。规则以 js/engine.js 为权威实现（本地优先架构），
+本模块与其保持一致，由共享 fixture backend/tests/fixtures/rules.json 双端锁定防漂移。"""
 
 from .common import INTERVALS, add_days
 

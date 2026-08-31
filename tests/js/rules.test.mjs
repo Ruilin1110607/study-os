@@ -12,7 +12,8 @@ const { createRequire } = await import('node:module');
 const require = createRequire(import.meta.url);
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-// engine.js/intel.js 是浏览器全局脚本：先加载 engine 并挂到全局，intel 才能引用
+// engine.js/intel.js 是浏览器全局脚本：先加载 util/engine 并挂到全局，intel 才能引用
+globalThis.Util = require(path.join(ROOT, 'js', 'util.js'));
 const Engine = require(path.join(ROOT, 'js', 'engine.js'));
 globalThis.Engine = Engine;
 const Intel = require(path.join(ROOT, 'js', 'intel.js'));

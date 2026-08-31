@@ -1,13 +1,7 @@
 const Profiler = (() => {
   const DAY_MS = 86400000;
   const clamp = v => Math.max(0, Math.min(100, Math.round(v)));
-  const pad = n => String(n).padStart(2, '0');
-  const dstr = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-  const addDays = (str, n) => {
-    const d = new Date(str + 'T00:00:00');
-    d.setDate(d.getDate() + n);
-    return dstr(d);
-  };
+  const { addDays } = Util;
 
   function compute() {
     const S = Store.state;
