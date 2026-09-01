@@ -68,16 +68,24 @@ const ViewsPractice = (() => {
         <button class="btn ghost sm" data-act="q-add-open">+ 手动加题</button>
         ${AI.ready() ? '<button class="btn primary sm" data-act="q-gen-open">AI 批量出题</button>' : ''}
       </div>
-${S.questions.length ? groups.map(g => {
+${bankBody()}
+    </div>`;
+
+    function bankBody() {
+      if (!S.questions.length) {
+        const tip = AI.ready()
+          ? '点右上角「AI 批量出题」，或对智能推荐的知识点点「AI 出题」。'
+          : '配置 AI 后可一键出题；现在也可以用「手动加题」和上方「快速自测」。';
+        return '<div class="empty">题库还是空的。<br>' + tip + '</div>';
+      }
+      return groups.map(g => {
         const c = Engine.course(g.courseId);
         const choiceN = g.qs.filter(q => q.options && q.options.length >= 2).length;
-        const summary = `${esc(c ? c.name : '未关联课程')}<span class="muted sm" style="font-weight:400">${g.qs.length} 题</span>`;
-        const body = `<div style="margin-bottom:8px"><button class="btn primary sm" data-act="prac-set" data-course="${esc(g.courseId)}">整组开练（${choiceN} 道选择题）</button></div>${g.qs.slice().reverse().map(qRowHtml).join('')}`;
-        return `<details class="report"><summary>${summary}</summary><div class="rep-body">${body}</div></details>`;
-      }).join('') : `<div class="empty">题库还是空的。<br>${AI.ready()
-        ? '点右上角「AI 批量出题」，或对智能推荐的知识点点「AI 出题」。'
-        : '配置 AI 后可一键出题；现在也可以用「手动加题」和上方「快速自测」。'}</div>'}
-    </div>`;
+        const summary = esc(c ? c.name : '未关联课程') + '<span class="muted sm" style="font-weight:400">' + g.qs.length + ' 题</span>';
+        const body = '<div style="margin-bottom:8px"><button class="btn primary sm" data-act="prac-set" data-course="' + esc(g.courseId) + '">整组开练（' + choiceN + ' 道选择题）</button></div>' + g.qs.slice().reverse().map(qRowHtml).join('');
+        return '<details class="report"><summary>' + summary + '</summary><div class="rep-body">' + body + '</div></details>';
+      }).join('');
+    }
 
     const recent = S.attempts.slice(-8).reverse().map(a => {
       const p = Engine.kp(a.kpId);
