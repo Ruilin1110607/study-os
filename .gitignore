@@ -1,6 +1,19 @@
+# Python
 __pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# 运行时数据与密钥
 backend/studyos.db
+backend/studyos.db-wal
+backend/studyos.db-shm
 backend/secret.key
 
+# Node / 前端
+node_modules/
+
+# 工具缓存
 .wrangler/
 .zcode/
